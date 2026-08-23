@@ -1,0 +1,351 @@
+import sys
+import unittest
+from email.message import EmailMessage
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
+import omarchy_mail as mail
+
+
+def row(**kw):
+    item = {
+        "account_id": "acct1",
+        "mailbox": "inbox",
+        "uid": 1,
+        "unread": False,
+        "subject": "Hello",
+        "when": "Sat, 22 Aug 2026 20:16:05 -0600",
+        "when_ts": 1000,
+        "from_name": "Maya Chen",
+        "from_email": "maya@example.com",
+        "account_email": "you@example.com",
+        "to": [("You", "you@example.com")],
+        "cc": [],
+        "mine": False,
+        "key": "",
+        "message_id": "<a@example.com>",
+        "ids": ["<a@example.com>"],
+    }
+    item.update(kw)
+    return item
+
+
+class TestDecodeAndHtml(unittest.TestCase):
+    def test_rfc2047_q_word(self):
+        self.assertEqual(mail.decode_mime_words("=?UTF-8?Q?hello_there?="), "hello there")
+
+    def test_rfc2047_b_word(self):
+        encoded = "=?utf-8?B?TG9yZW0gaXBzdW0gZG9sb3Igc2l0IGFtZXQsIGNvbnNlY3RldHVyIGFkaXBpc2NpbmcgZWxpdC4gVXQgaW50ZXJkdW0gcXVhbSBldSBmYWNpbGlzaXMgb3JuYXJlLg==?="
+        self.assertEqual(
+            mail.decode_mime_words(encoded),
+            "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Ut interdum quam eu facilisis ornare.",
+        )
+
+    def test_rfc2047_split_q_subject(self):
+        encoded = "=?UTF-8?Q?Fwd:_Meeting_records:_=E2=80=9COnline_Givehub_Meeting_?= =?UTF-8?Q?with_Debbie_Churchill=E2=80=9D,_Aug_19,_2026?="
+        self.assertEqual(
+            mail.decode_mime_words(encoded),
+            "Fwd: Meeting records: “Online Givehub Meeting with Debbie Churchill”, Aug 19, 2026",
+        )
+
+    def test_rfc2047_split_in_the_middle(self):
+        encoded = "=?UTF-8?Q?Fwd:_Meeting_records:_=E2=80=9COnline_Givehub_Meeting_=?= =?UTF-8?Q?bie_Churchill=29=E2=80=9D,_Aug_19=2C_2026?="
+        got = mail.decode_mime_words(encoded)
+        self.assertNotIn("=?UTF-8", got)
+        self.assertIn("Givehub", got)
+        self.assertIn("Churchill", got)
+
+    def test_decode_bytes_strips_quotes(self):
+        self.assertEqual(mail.decode_bytes(b'"=?UTF-8?Q?Hello_world?="'), "Hello world")
+
+    def test_html_entities(self):
+        self.assertEqual(mail.unescape("A&nbsp;B&amp;C"), "A B&C")
+        self.assertEqual(mail.html_to_text("<p>join&zwnj;ed</p>").replace("\n", ""), "joined")
+
+    def test_blockquote_is_quote_not_history(self):
+        html = "<p>My reply.</p><blockquote>Earlier message from Kyle</blockquote>"
+        blocks = mail.text_to_blocks(mail.html_to_text(html))
+        self.assertTrue(any(b["type"] == "p" and "My reply" in b["text"] for b in blocks))
+        quote = next(b for b in blocks if b["type"] == "quote")
+        self.assertIn("Earlier message from Kyle", quote["text"])
+        self.assertTrue(all(b["type"] != "history" for b in blocks))
+
+    def test_quoted_reply_is_history(self):
+        text = (
+            "Sounds good.\n\n"
+            "> On Tue, Aug 19, 2026 at 3:07 PM K Salone wrote:\n"
+            "> Hello everyone\n"
+            "> Please find the notes below.\n"
+            "> More of the previous email keeps going."
+        )
+        blocks = mail.text_to_blocks(text)
+        self.assertTrue(any(b["type"] == "p" and "Sounds good" in b["text"] for b in blocks))
+        self.assertTrue(any(b["type"] == "history" and "Hello everyone" in b["text"] for b in blocks))
+
+    def test_addresses(self):
+        self.assertEqual(
+            mail.parse_addr_token("Ada Lovelace <ada@example.com>"),
+            ("Ada Lovelace", "ada@example.com"),
+        )
+        self.assertEqual(mail.parse_addr_token("ada@example.com"), ("", "ada@example.com"))
+        self.assertTrue(mail.looks_like_email("ada@example.com"))
+        self.assertFalse(mail.looks_like_email("not-an-address"))
+        got = mail.parse_recipients(["Ada <ada@example.com>, bob@site.org"])
+        self.assertEqual(len(got), 2)
+        self.assertEqual(got[1][1], "bob@site.org")
+        draft = mail.parse_recipient_list(["ada@example.com, not-an-address"], False)
+        self.assertEqual(draft, [("", "ada@example.com")])
+        self.assertEqual(mail.parse_recipient_list([""], False), [])
+
+
+class TestThreading(unittest.TestCase):
+    def test_reply_joins_parent_by_in_reply_to(self):
+        parent = row(
+            uid=1,
+            message_id="<a@example.com>",
+            ids=["<a@example.com>"],
+            when_ts=1,
+            subject="Hello",
+        )
+        reply = row(
+            uid=2,
+            message_id="<b@example.com>",
+            ids=["<b@example.com>", "<a@example.com>"],
+            subject="Re: Hello",
+            when_ts=2,
+            from_name="You",
+            from_email="you@example.com",
+            mine=True,
+        )
+        convs = mail.group_rows([parent, reply], "inbox")
+        self.assertEqual(len(convs), 1)
+        self.assertEqual(convs[0]["uids"], [1, 2])
+        self.assertEqual(convs[0]["id"], "acct1:<a@example.com>")
+        names = [p["name"] for p in convs[0]["participants"]]
+        self.assertIn("Maya Chen", names)
+        self.assertIn("You", names)
+
+    def test_unrelated_ids_stay_apart(self):
+        a = row(uid=1, message_id="<a@example.com>", ids=["<a@example.com>"], subject="One")
+        b = row(
+            uid=2,
+            message_id="<b@example.com>",
+            ids=["<b@example.com>"],
+            subject="Two",
+            from_name="Luis",
+            from_email="luis@example.com",
+            when_ts=2000,
+            when="Sun, 23 Aug 2026 09:00:00 -0600",
+        )
+        convs = mail.group_rows([a, b], "inbox")
+        self.assertEqual(len(convs), 2)
+
+    def test_subject_fallback_strips_re(self):
+        a = row(uid=1, message_id="", ids=[], subject="Dinner", when_ts=1)
+        b = row(
+            uid=2,
+            message_id="",
+            ids=[],
+            subject="Re: Dinner",
+            when_ts=2,
+            from_name="Luis",
+            from_email="luis@example.com",
+        )
+        convs = mail.group_rows([a, b], "inbox")
+        self.assertEqual(len(convs), 1)
+        self.assertEqual(convs[0]["uids"], [1, 2])
+
+    def test_sent_and_inbox_share_thread_when_viewing_inbox(self):
+        incoming = row(
+            uid=10,
+            mailbox="inbox",
+            message_id="<a@example.com>",
+            ids=["<a@example.com>"],
+            unread=True,
+            when_ts=1,
+        )
+        sent = row(
+            uid=20,
+            mailbox="sent",
+            message_id="<b@example.com>",
+            ids=["<b@example.com>", "<a@example.com>"],
+            mine=True,
+            from_name="You",
+            from_email="you@example.com",
+            unread=False,
+            when_ts=2,
+        )
+        convs = mail.group_rows([incoming, sent], "inbox")
+        self.assertEqual(len(convs), 1)
+        self.assertEqual(convs[0]["items"], [
+            {"mailbox": "inbox", "uid": 10},
+            {"mailbox": "sent", "uid": 20},
+        ])
+        self.assertTrue(convs[0]["unread"])
+
+    def test_sent_only_thread_hidden_in_inbox(self):
+        sent = row(uid=20, mailbox="sent", message_id="<s@example.com>", ids=["<s@example.com>"])
+        self.assertEqual(mail.group_rows([sent], "inbox"), [])
+
+    def test_normalize_subject(self):
+        self.assertEqual(mail.normalize_subject("Re: Fwd: Hello"), "hello")
+        self.assertEqual(mail.thread_key({"in-reply-to": "<a@x>"}, "Re: Hi"), "<a@x>")
+        self.assertEqual(mail.thread_key({}, "Re: Hi"), "subj:hi")
+
+
+class TestSearch(unittest.TestCase):
+    def test_imap_quote(self):
+        self.assertEqual(mail.imap_quote('a"b'), '"a\\"b"')
+
+    def test_and_or_search_builds_or_tree(self):
+        clause = mail.and_or_search("roy", ["SUBJECT", "FROM", "TO", "CC"], False)
+        self.assertEqual(
+            clause,
+            'OR OR OR SUBJECT "roy" FROM "roy" TO "roy" CC "roy"',
+        )
+
+    def test_and_or_search_ands_tokens(self):
+        clause = mail.and_or_search("kick friday", ["SUBJECT", "FROM"], False)
+        self.assertIn('SUBJECT "kick"', clause)
+        self.assertIn('SUBJECT "friday"', clause)
+        self.assertTrue(clause.startswith("OR ") or " OR " in clause)
+
+    def test_query_set_latest_page_uses_sequence(self):
+        spec, use_uid = mail.query_set(None, 100, 50, "", False)
+        self.assertEqual(spec, "51:100")
+        self.assertFalse(use_uid)
+
+    def test_query_set_empty_mailbox(self):
+        spec, use_uid = mail.query_set(None, 0, 50, "", False)
+        self.assertEqual(spec, "")
+        self.assertFalse(use_uid)
+
+    def test_query_set_small_mailbox(self):
+        spec, _use_uid = mail.query_set(None, 3, 50, "", False)
+        self.assertEqual(spec, "1:3")
+
+
+class TestMime(unittest.TestCase):
+    def _message(self, with_html=False, with_pdf=False):
+        msg = EmailMessage()
+        msg["From"] = "Maya Chen <maya@example.com>"
+        msg["To"] = "You <you@example.com>"
+        msg["Cc"] = "Luis Ortega <luis@example.com>"
+        msg["Subject"] = "Project kickoff Friday"
+        msg["Message-ID"] = "<kick@example.com>"
+        msg["Date"] = "Sat, 22 Aug 2026 20:16:05 -0600"
+        if with_html:
+            msg.set_content("plain body")
+            msg.add_alternative("<p>html &amp; body</p>", subtype="html")
+        else:
+            msg.set_content("Friday morning works.")
+        if with_pdf:
+            msg.add_attachment(
+                b"%PDF-fake",
+                maintype="application",
+                subtype="pdf",
+                filename="agenda.pdf",
+            )
+        return msg
+
+    def test_plain_parse(self):
+        raw = self._message().as_bytes()
+        parsed = mail.parse_message(
+            {"email": "you@example.com", "id": "acct1"}, "inbox", 12, raw
+        )
+        self.assertEqual(parsed["from"], "Maya Chen")
+        self.assertEqual(parsed["fromEmail"], "maya@example.com")
+        self.assertFalse(parsed["mine"])
+        self.assertIn("Friday morning works.", parsed["text"])
+        self.assertEqual(parsed["uid"], 12)
+        self.assertEqual(parsed["attachments"], [])
+        self.assertEqual(len(parsed["cc"]), 1)
+        self.assertEqual(parsed["cc"][0]["email"], "luis@example.com")
+
+    def test_html_alternative_keeps_plain(self):
+        raw = self._message(with_html=True).as_bytes()
+        parsed = mail.parse_message({"email": "you@example.com"}, "inbox", 1, raw)
+        self.assertIn("plain body", parsed["text"])
+        self.assertNotIn("&amp;", parsed["text"])
+
+    def test_collect_and_extract_pdf(self):
+        msg = self._message(with_pdf=True)
+        atts = mail.collect_attachments(msg)
+        self.assertEqual(len(atts), 1)
+        self.assertEqual(atts[0]["name"], "agenda.pdf")
+        self.assertEqual(atts[0]["mime"], "application/pdf")
+        self.assertGreater(atts[0]["size"], 0)
+        name, mime, data = mail.extract_part(msg, atts[0]["index"])
+        self.assertEqual(name, "agenda.pdf")
+        self.assertEqual(mime, "application/pdf")
+        self.assertEqual(data, b"%PDF-fake")
+
+    def test_extract_rejects_body_part(self):
+        msg = self._message()
+        with self.assertRaises(mail.Error):
+            mail.extract_part(msg, 0)
+
+    def test_safe_filename_strips_paths(self):
+        self.assertEqual(mail.safe_filename("../../etc/passwd"), "passwd")
+        self.assertEqual(mail.safe_filename(""), "attachment")
+
+    def test_mine_uses_account_email(self):
+        msg = self._message()
+        msg.replace_header("From", "You <you@example.com>")
+        parsed = mail.parse_message({"email": "you@example.com"}, "sent", 3, msg.as_bytes())
+        self.assertTrue(parsed["mine"])
+        self.assertEqual(parsed["from"], "You")
+
+
+class TestImapParsing(unittest.TestCase):
+    def test_parse_list_line_special_use(self):
+        name, attrs = mail.parse_list_line(
+            b'(\\HasNoChildren \\Sent) "/" "INBOX.Sent Messages"'
+        )
+        self.assertEqual(name, "INBOX.Sent Messages")
+        self.assertIn("sent", attrs)
+
+    def test_parse_list_line_junk(self):
+        name, attrs = mail.parse_list_line(b'(\\Junk \\HasNoChildren) "." INBOX.Junk')
+        self.assertEqual(name, "INBOX.Junk")
+        self.assertIn("junk", attrs)
+
+    def test_fetch_flags_unread(self):
+        data = [
+            (
+                b"1 (UID 23641 FLAGS (\\Seen) INTERNALDATE \"22-Aug-2026 20:16:05 -0600\" BODY[HEADER.FIELDS (SUBJECT)] {8}",
+                b"Subject:",
+            ),
+            b")",
+        ]
+        rows = mail.parse_fetch_data(data)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["uid"], 23641)
+        self.assertFalse(rows[0]["unread"])
+        self.assertIn("22-Aug-2026", rows[0]["internaldate"])
+
+    def test_fetch_unseen_without_seen_flag(self):
+        data = [(b"2 (UID 9 FLAGS (\\Flagged) BODY[] {4}", b"Hi\r\n")]
+        rows = mail.parse_fetch_data(data)
+        self.assertEqual(rows[0]["uid"], 9)
+        self.assertTrue(rows[0]["unread"])
+
+    def test_contacts_skip_self_and_prefer_inbox_from(self):
+        accounts = [{"email": "you@example.com"}]
+        rows = [
+            row(from_name="Maya Chen", from_email="maya@example.com", mailbox="inbox", when_ts=2),
+            row(
+                mailbox="sent",
+                from_email="you@example.com",
+                to=[("Maya Chen", "maya@example.com"), ("Luis", "luis@example.com")],
+                cc=[],
+                when_ts=1,
+            ),
+        ]
+        contacts = mail.collect_contacts(accounts, rows)
+        emails = [c["email"] for c in contacts]
+        self.assertEqual(emails, ["maya@example.com", "luis@example.com"])
+
+
+if __name__ == "__main__":
+    unittest.main()

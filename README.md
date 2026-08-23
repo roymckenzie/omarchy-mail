@@ -92,6 +92,14 @@ omarchy plugin enable io.github.roymckenzie.omarchy-mail --section right
 Saving QML reloads the plugin. After changing the helper script, close and
 reopen the panel (or `omarchy restart shell`) so Quickshell starts a new process.
 
+Helper tests (RFC2047, threading, SEARCH, MIME) need no mail server:
+
+```sh
+python3 bin/omarchy-mail-helper --test
+# or
+./build.sh
+```
+
 ## Remove
 
 ```sh

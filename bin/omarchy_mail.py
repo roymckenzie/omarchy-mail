@@ -2153,43 +2153,14 @@ def main() -> None:
 
 
 def run_tests() -> int:
-    assert decode_mime_words("=?UTF-8?Q?hello_there?=") == "hello there"
-    encoded = "=?utf-8?B?TG9yZW0gaXBzdW0gZG9sb3Igc2l0IGFtZXQsIGNvbnNlY3RldHVyIGFkaXBpc2NpbmcgZWxpdC4gVXQgaW50ZXJkdW0gcXVhbSBldSBmYWNpbGlzaXMgb3JuYXJlLg==?="
-    assert (
-        decode_mime_words(encoded)
-        == "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Ut interdum quam eu facilisis ornare."
+    import unittest
+
+    suite = unittest.defaultTestLoader.discover(
+        str(Path(__file__).resolve().parent.parent / "tests"),
+        pattern="test_*.py",
     )
-    encoded = "=?UTF-8?Q?Fwd:_Meeting_records:_=E2=80=9COnline_Givehub_Meeting_?= =?UTF-8?Q?with_Debbie_Churchill=E2=80=9D,_Aug_19,_2026?="
-    assert (
-        decode_mime_words(encoded)
-        == "Fwd: Meeting records: “Online Givehub Meeting with Debbie Churchill”, Aug 19, 2026"
-    )
-    encoded = "=?UTF-8?Q?Fwd:_Meeting_records:_=E2=80=9COnline_Givehub_Meeting_=?= =?UTF-8?Q?bie_Churchill=29=E2=80=9D,_Aug_19=2C_2026?="
-    got = decode_mime_words(encoded)
-    assert "=?UTF-8" not in got and "Givehub" in got and "Churchill" in got
-    assert decode_bytes(b'"=?UTF-8?Q?Hello_world?="') == "Hello world"
-    assert unescape("A&nbsp;B&amp;C") == "A B&C"
-    assert html_to_text("<p>join&zwnj;ed</p>").replace("\n", "") == "joined"
-    html = "<p>My reply.</p><blockquote>Earlier message from Kyle</blockquote>"
-    blocks = text_to_blocks(html_to_text(html))
-    assert any(b["type"] == "p" and "My reply" in b["text"] for b in blocks)
-    quote = next(b for b in blocks if b["type"] == "quote")
-    assert "Earlier message from Kyle" in quote["text"]
-    assert all(b["type"] != "history" for b in blocks)
-    text = "Sounds good.\n\n> On Tue, Aug 19, 2026 at 3:07 PM K Salone wrote:\n> Hello everyone\n> Please find the notes below.\n> More of the previous email keeps going."
-    blocks = text_to_blocks(text)
-    assert any(b["type"] == "p" and "Sounds good" in b["text"] for b in blocks)
-    assert any(b["type"] == "history" and "Hello everyone" in b["text"] for b in blocks)
-    assert parse_addr_token("Ada Lovelace <ada@example.com>") == ("Ada Lovelace", "ada@example.com")
-    assert parse_addr_token("ada@example.com") == ("", "ada@example.com")
-    assert looks_like_email("ada@example.com") and not looks_like_email("not-an-address")
-    got = parse_recipients(["Ada <ada@example.com>, bob@site.org"])
-    assert len(got) == 2 and got[1][1] == "bob@site.org"
-    draft = parse_recipient_list(["ada@example.com, not-an-address"], False)
-    assert draft == [("", "ada@example.com")]
-    assert parse_recipient_list([""], False) == []
-    print("ok")
-    return 0
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    return 0 if result.wasSuccessful() else 1
 
 
 if __name__ == "__main__":
