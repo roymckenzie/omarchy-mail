@@ -285,6 +285,59 @@ class TestMime(unittest.TestCase):
         with self.assertRaises(mail.Error):
             mail.extract_part(msg, 0)
 
+    def test_cap_text_truncates(self):
+        old = mail.MAX_TEXT_CHARS
+        mail.MAX_TEXT_CHARS = 8
+        try:
+            self.assertEqual(mail.cap_text("hello"), "hello")
+            out = mail.cap_text("abcdefghijk")
+            self.assertTrue(out.endswith("[Truncated]"))
+            self.assertLessEqual(len(out), 8 + len("\n\n[Truncated]"))
+        finally:
+            mail.MAX_TEXT_CHARS = old
+
+    def test_parse_message_rejects_huge_raw(self):
+        old = mail.MAX_MESSAGE_BYTES
+        mail.MAX_MESSAGE_BYTES = 32
+        try:
+            with self.assertRaises(mail.Error):
+                mail.parse_message(
+                    {"email": "you@example.com"},
+                    "inbox",
+                    1,
+                    b"From: a@b.c\n\n" + b"x" * 64,
+                )
+        finally:
+            mail.MAX_MESSAGE_BYTES = old
+
+    def test_extract_part_rejects_huge_attachment(self):
+        old = mail.MAX_ATTACHMENT_BYTES
+        mail.MAX_ATTACHMENT_BYTES = 4
+        try:
+            msg = EmailMessage()
+            msg["From"] = "a@b.c"
+            msg["To"] = "c@d.e"
+            msg.set_content("hi")
+            msg.add_attachment(
+                b"0123456789",
+                maintype="application",
+                subtype="octet-stream",
+                filename="big.bin",
+            )
+            atts = mail.collect_attachments(msg)
+            self.assertEqual(len(atts), 1)
+            with self.assertRaises(mail.Error):
+                mail.extract_part(msg, atts[0]["index"])
+        finally:
+            mail.MAX_ATTACHMENT_BYTES = old
+
+    def test_stub_oversized_message(self):
+        msg = mail.stub_oversized_message({"email": "you@example.com"}, "inbox", 9, True)
+        self.assertTrue(msg["truncated"])
+        self.assertEqual(msg["uid"], 9)
+        self.assertEqual(msg["attachments"], [])
+        self.assertIn("too large", msg["text"])
+
     def test_safe_filename_strips_paths(self):
         self.assertEqual(mail.safe_filename("../../etc/passwd"), "passwd")
         self.assertEqual(mail.safe_filename(""), "attachment")
@@ -329,6 +382,13 @@ class TestImapParsing(unittest.TestCase):
         rows = mail.parse_fetch_data(data)
         self.assertEqual(rows[0]["uid"], 9)
         self.assertTrue(rows[0]["unread"])
+
+    def test_fetch_rfc822_size(self):
+        data = [(b"1 (UID 12 RFC822.SIZE 441 FLAGS (\\Seen)", b"")]
+        rows = mail.parse_fetch_data(data)
+        self.assertEqual(rows[0]["uid"], 12)
+        self.assertEqual(rows[0]["size"], 441)
+        self.assertFalse(rows[0]["unread"])
 
     def test_contacts_skip_self_and_prefer_inbox_from(self):
         accounts = [{"email": "you@example.com"}]

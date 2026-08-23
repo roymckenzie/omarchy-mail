@@ -22,10 +22,14 @@ from pathlib import Path
 from typing import Any
 
 PAGE = 50
+MAX_MESSAGE_BYTES = 32 * 1024 * 1024
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+MAX_TEXT_CHARS = 400_000
 FETCH_HEADERS = (
     "(UID FLAGS INTERNALDATE "
     "BODY.PEEK[HEADER.FIELDS (FROM TO CC BCC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO)])"
 )
+FETCH_SIZE = "(UID RFC822.SIZE FLAGS)"
 FETCH_BODY = "(FLAGS BODY.PEEK[])"
 
 MAILBOX_CANDIDATES = {
@@ -471,6 +475,9 @@ def push_quoted(out: list[str], piece: str, depth: int) -> None:
 
 
 def html_to_text(html: str) -> str:
+    html = str(html or "")
+    if len(html) > MAX_TEXT_CHARS * 8:
+        html = html[: MAX_TEXT_CHARS * 8]
     out: list[str] = []
     in_tag = False
     skip = False
@@ -924,6 +931,7 @@ def resolve_mailbox(imap: IMAP4, role: str) -> str:
 UID_RE = re.compile(rb"\bUID\s+(\d+)", re.I)
 FLAGS_RE = re.compile(rb"FLAGS\s+\(([^)]*)\)", re.I)
 INTERNALDATE_RE = re.compile(rb'INTERNALDATE\s+"([^"]+)"', re.I)
+SIZE_RE = re.compile(rb"RFC822\.SIZE\s+(\d+)", re.I)
 
 
 def parse_fetch_data(data: list[Any]) -> list[dict[str, Any]]:
@@ -947,11 +955,13 @@ def parse_fetch_data(data: list[Any]) -> list[dict[str, Any]]:
         uid_m = UID_RE.search(meta)
         flags_m = FLAGS_RE.search(meta)
         date_m = INTERNALDATE_RE.search(meta)
+        size_m = SIZE_RE.search(meta)
         flags = (flags_m.group(1).decode("utf-8", "replace").lower() if flags_m else "")
         out.append(
             {
                 "uid": int(uid_m.group(1)) if uid_m else 0,
                 "unread": "\\seen" not in flags,
+                "size": int(size_m.group(1)) if size_m else 0,
                 "internaldate": date_m.group(1).decode("utf-8", "replace") if date_m else "",
                 "body": body,
                 "meta": meta,
@@ -1330,6 +1340,61 @@ def save_list_cache(conversations: list[dict[str, Any]], contacts: list[dict[str
 # --- MIME messages -----------------------------------------------------------
 
 
+def cap_text(text: str) -> str:
+    s = str(text or "")
+    if len(s) <= MAX_TEXT_CHARS:
+        return s
+    return s[:MAX_TEXT_CHARS].rstrip() + "\n\n[Truncated]"
+
+
+def part_encoded_size(part) -> int:
+    payload = part.get_payload(decode=False)
+    if payload is None:
+        return 0
+    if isinstance(payload, bytes):
+        return len(payload)
+    if isinstance(payload, str):
+        return len(payload.encode("utf-8", "replace"))
+    if isinstance(payload, list):
+        return sum(part_encoded_size(item) if hasattr(item, "get_payload") else 0 for item in payload)
+    return 0
+
+
+def stub_oversized_message(
+    account: dict[str, Any], mailbox: str, uid: int, unread: bool, header_item: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    from_name, from_email, when = "", "", ""
+    if header_item:
+        headers = headers_from_bytes(header_item.get("body") or b"")
+        people = people_from_header(headers.get("from", ""))
+        if people:
+            from_name, from_email = people[0]
+        when = headers.get("date") or header_item.get("internaldate") or ""
+    me = str(account.get("email") or "")
+    mine = bool(from_email) and from_email.lower() == me.lower()
+    note = "This message is too large to open in Mail."
+    return {
+        "id": f"{mailbox}:{uid}",
+        "uid": uid,
+        "mailbox": mailbox,
+        "from": "You" if mine else (from_name or from_email),
+        "fromEmail": from_email,
+        "mine": mine,
+        "when": when,
+        "messageId": "",
+        "inReplyTo": "",
+        "references": "",
+        "to": [],
+        "cc": [],
+        "bcc": [],
+        "text": note,
+        "blocks": [{"type": "p", "text": note}],
+        "attachments": [],
+        "unread": bool(unread),
+        "truncated": True,
+    }
+
+
 def leaf_parts(msg) -> list[Any]:
     if msg.is_multipart():
         out = []
@@ -1375,13 +1440,20 @@ def collect_attachments(msg) -> list[dict[str, Any]]:
     for index, part in enumerate(leaf_parts(msg)):
         if not part_is_file(part):
             continue
-        payload = part.get_payload(decode=True) or b""
+        encoded = part_encoded_size(part)
+        if encoded > MAX_ATTACHMENT_BYTES:
+            size = encoded
+        else:
+            payload = part.get_payload(decode=True) or b""
+            size = len(payload)
+            if size > MAX_ATTACHMENT_BYTES:
+                size = MAX_ATTACHMENT_BYTES
         out.append(
             {
                 "index": index,
                 "name": part_filename(part, index),
                 "mime": (part.get_content_type() or "").lower(),
-                "size": len(payload),
+                "size": size,
             }
         )
     return out
@@ -1394,16 +1466,26 @@ def extract_part(msg, index: int) -> tuple[str, str, bytes]:
     part = leaves[index]
     if not part_is_file(part):
         raise Error("not an attachment")
-    return part_filename(part, index), (part.get_content_type() or "").lower(), part.get_payload(decode=True) or b""
+    if part_encoded_size(part) > MAX_ATTACHMENT_BYTES * 2:
+        raise Error("attachment too large")
+    data = part.get_payload(decode=True) or b""
+    if len(data) > MAX_ATTACHMENT_BYTES:
+        raise Error("attachment too large")
+    return part_filename(part, index), (part.get_content_type() or "").lower(), data
 
 
 def decode_part_text(part) -> str:
+    if part_encoded_size(part) > MAX_TEXT_CHARS * 8:
+        return "[Truncated]"
     payload = part.get_payload(decode=True) or b""
+    if len(payload) > MAX_TEXT_CHARS * 4:
+        payload = payload[: MAX_TEXT_CHARS * 4]
     charset = part.get_content_charset() or "utf-8"
     try:
-        return payload.decode(charset, "replace")
+        text = payload.decode(charset, "replace")
     except LookupError:
-        return payload.decode("utf-8", "replace")
+        text = payload.decode("utf-8", "replace")
+    return cap_text(text)
 
 
 def part_text(msg) -> tuple[str, bool]:
@@ -1425,6 +1507,8 @@ def part_text(msg) -> tuple[str, bool]:
 def parse_message(
     account: dict[str, Any], mailbox: str, uid: int, raw: bytes, unread: bool = False
 ) -> dict[str, Any]:
+    if len(raw) > MAX_MESSAGE_BYTES:
+        raise Error("message too large")
     msg = BytesParser(policy=policy.default).parsebytes(raw)
     from_header = str(msg.get("From") or "")
     from_name, from_email = parse_from(from_header)
@@ -1434,7 +1518,7 @@ def parse_message(
             from_name, from_email = people[0]
     when = str(msg.get("Date") or "")
     body, is_html = part_text(msg)
-    text = html_to_text(body) if is_html else body
+    text = cap_text(html_to_text(body) if is_html else body)
     me = str(account.get("email") or "")
     mine = bool(from_email) and from_email.lower() == me.lower()
     return {
@@ -1859,12 +1943,37 @@ def fetch_cmd(state: State, req: dict[str, Any]) -> dict[str, Any]:
             except Exception:
                 continue
             uid_set = ",".join(str(u) for u in uids)
-            items = imap_fetch(imap, uid_set, FETCH_BODY, True)
-            if not items:
-                items = imap_fetch(imap, uid_set, "(FLAGS RFC822)", True)
-            for item in items:
-                body = item.get("body") or b""
-                if body:
+            sizes = {item["uid"]: item for item in imap_fetch(imap, uid_set, FETCH_SIZE, True) if item.get("uid")}
+            fetch_uids: list[int] = []
+            for uid in uids:
+                info = sizes.get(uid) or {}
+                size = int(info.get("size") or 0)
+                unread = bool(info.get("unread", True))
+                if size > MAX_MESSAGE_BYTES:
+                    headers = imap_fetch(imap, str(uid), FETCH_HEADERS, True)
+                    messages.append(
+                        stub_oversized_message(
+                            account, role, uid, unread, headers[0] if headers else None
+                        )
+                    )
+                else:
+                    fetch_uids.append(uid)
+            if fetch_uids:
+                spec = ",".join(str(u) for u in fetch_uids)
+                items = imap_fetch(imap, spec, FETCH_BODY, True)
+                if not items:
+                    items = imap_fetch(imap, spec, "(FLAGS RFC822)", True)
+                for item in items:
+                    body = item.get("body") or b""
+                    if not body:
+                        continue
+                    if len(body) > MAX_MESSAGE_BYTES:
+                        messages.append(
+                            stub_oversized_message(
+                                account, role, item["uid"], bool(item.get("unread")), item
+                            )
+                        )
+                        continue
                     messages.append(
                         parse_message(
                             account, role, item["uid"], body, bool(item.get("unread"))
@@ -2022,16 +2131,24 @@ def attachment_cmd(state: State, req: dict[str, Any]) -> dict[str, Any]:
     def work(_account, imap):
         mailbox = resolve_mailbox(imap, role)
         imap.select(mailbox)
+        sizes = imap_fetch(imap, str(uid), FETCH_SIZE, True)
+        size = int((sizes[0].get("size") if sizes else 0) or 0)
+        if size > MAX_MESSAGE_BYTES:
+            raise Error("message too large")
         items = imap_fetch(imap, str(uid), FETCH_BODY, True)
         if not items:
-            items = imap_fetch(imap, str(uid), "(RFC822)", True)
+            items = imap_fetch(imap, str(uid), "(FLAGS RFC822)", True)
         raw = next((item.get("body") for item in items if item.get("body")), b"")
         if not raw:
             raise Error("couldn't fetch message")
+        if len(raw) > MAX_MESSAGE_BYTES:
+            raise Error("message too large")
         msg = BytesParser(policy=policy.default).parsebytes(raw)
         return extract_part(msg, index)
 
     name, _mime, data = state.with_session(account_id, work)
+    if len(data) > MAX_ATTACHMENT_BYTES:
+        raise Error("attachment too large")
     dest_dir = download_dir() if action == "save" else open_cache_dir()
     dest = unique_path(dest_dir, name)
     dest.parent.mkdir(parents=True, exist_ok=True)
