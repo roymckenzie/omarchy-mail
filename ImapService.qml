@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import "Model.js" as Model
 
+// QProcess-style wrapper: JSON lines to bin/omarchy-mail-helper (Python IMAP/SMTP).
 Item {
   id: root
 

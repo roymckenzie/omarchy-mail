@@ -6,6 +6,8 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
+// Hosted by omarchy-shell (Quickshell), not a standalone QApplication.
+// IMAP/SMTP is the Python child in bin/omarchy_mail.py (see ImapService.qml).
 Panel {
   id: root
   moduleName: "io.github.roymckenzie.omarchy-mail"

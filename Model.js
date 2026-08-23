@@ -1,4 +1,5 @@
 .pragma library
+// Pure helpers for the QML UI (addresses, filters, reply-all). No widget state.
 
 function copy(value) {
   return JSON.parse(JSON.stringify(value))
