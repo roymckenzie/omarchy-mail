@@ -20,22 +20,16 @@ omarchy plugin add https://github.com/roymckenzie/omarchy-mail.git --enable
 `--enable` places the widget on the right of the bar. Open it with a left
 click, then add an IMAP/SMTP account (gear or `s`).
 
-The helper binary is `bin/omarchy-mail-helper`. `omarchy plugin add` does not
-build it. If that file is missing or not executable:
-
-```sh
-cd ~/.config/omarchy/plugins/io.github.roymckenzie.omarchy-mail
-./build.sh
-omarchy restart shell
-```
+The helper is `bin/omarchy-mail-helper`, a Python 3 script. `omarchy plugin add`
+is enough; there is no compile step.
 
 ## Requirements
 
 - [Omarchy](https://omarchy.org/) with `omarchy-shell`
 - An IMAP and SMTP mailbox (host, ports, username, password)
 - `secret-tool` (`libsecret`) for passwords in the user keyring
-- `python3`, plus `xdg-desktop-portal` (GTK 3 fallback) for the attach picker
-- `rustc`, `cargo`, and OpenSSL only when building the helper with `./build.sh`
+- `python3` (stdlib `imaplib` / `smtplib` / `email`)
+- `xdg-desktop-portal` (GTK 3 fallback) for the attach picker
 
 The plugin does not use sudo. It talks to your mail hosts from the helper
 process, stores account metadata in
@@ -95,8 +89,8 @@ ln -sfn "$PWD/omarchy-mail" \
 omarchy plugin enable io.github.roymckenzie.omarchy-mail --section right
 ```
 
-Saving QML reloads the plugin. After rebuilding the helper, run
-`omarchy restart shell` if the running helper is still the old binary.
+Saving QML reloads the plugin. After changing the helper script, close and
+reopen the panel (or `omarchy restart shell`) so Quickshell starts a new process.
 
 ## Remove
 
