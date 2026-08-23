@@ -9,7 +9,7 @@ With a saved account, the helper lists the latest 50 envelopes over IMAP,
 searches on the server, and fetches bodies when you open a thread. Envelope
 lists are cached on disk so the panel can open immediately; IMAP IDLE
 refreshes in the background and new mail posts an Omarchy notification.
-Until an account is saved, the panel shows demo mail.
+Until an account is saved, the panel is empty.
 
 ## Install
 
@@ -18,8 +18,7 @@ omarchy plugin add https://github.com/roymckenzie/omarchy-mail.git --enable
 ```
 
 `--enable` places the widget on the right of the bar. Open it with a left
-click, then add a real IMAP/SMTP account (gear or `s`). Do not save the demo
-accounts.
+click, then add an IMAP/SMTP account (gear or `s`).
 
 The helper binary is `bin/omarchy-mail-helper`. `omarchy plugin add` does not
 build it. If that file is missing or not executable:
@@ -70,7 +69,7 @@ o.bind("SUPER + M", "Mail", "omarchy-shell shell toggle io.github.roymckenzie.om
 - `g i` / `g s` / `g d` / `g e` / `g b` / `g t` jump to inbox, sent, drafts, archive, junk, trash
 - `Esc` hides address suggestions, then cancels compose/reply, then closes the panel
 - `Ctrl+Enter` sends, `Ctrl+S` saves a draft
-- Middle click (or `0`) reloads the mock inbox
+- Middle click (or `0`) reloads the current folder
 
 Reply, reply-all, forward, and compose are plaintext. Reply-all puts the sender
 in To and everyone else (minus you) in Cc. Compose Cc/Bcc fields expand from

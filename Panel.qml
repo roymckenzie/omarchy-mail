@@ -4,7 +4,6 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
-import "Mock.js" as Mock
 import "Model.js" as Model
 
 Panel {
@@ -108,6 +107,7 @@ Panel {
     return n
   }
   readonly property string heroMeta: {
+    if (!liveMail) return "Add an account"
     if (liveMail && mail.lastError !== "" && visibleInbox.length === 0) return "Can't connect"
     if (liveMail && mail.loading && visibleInbox.length === 0)
       return trimmedQuery !== "" ? "Searching…" : "Loading…"
@@ -127,6 +127,7 @@ Panel {
     return visibleInbox.length === 1 ? "1 conversation" : visibleInbox.length + " conversations"
   }
   readonly property string emptyLabel: {
+    if (!liveMail) return "Add an account to get started."
     if (liveMail && mail.lastError !== "") return "Couldn't load mail."
     if (liveMail && mail.loading) return trimmedQuery !== "" ? "Searching…" : "Loading…"
     if (trimmedQuery !== "" && visibleInbox.length === 0)
@@ -141,9 +142,11 @@ Panel {
   readonly property int selectedIndex: Model.indexOfId(visibleInbox, selectedId)
   readonly property var selected: selectedIndex >= 0 ? visibleInbox[selectedIndex] : null
   readonly property string barLabel: unreadAll > 0 ? "󰇮  " + unreadAll : "󰇮"
-  readonly property string tooltipText: unreadAll === 0
-    ? "No unread mail"
-    : (unreadAll === 1 ? "1 unread conversation" : unreadAll + " unread conversations")
+  readonly property string tooltipText: {
+    if (!liveMail) return "Add an account"
+    if (unreadAll === 0) return "No unread mail"
+    return unreadAll === 1 ? "1 unread conversation" : unreadAll + " unread conversations"
+  }
   readonly property var composeContactList: liveMail
     ? mail.contacts
     : Model.contactsFromInbox(inbox, accounts)
@@ -234,7 +237,6 @@ Panel {
   }
 
   function resetInbox() {
-    inbox = Mock.freshInbox()
     composing = false
     replyOpen = false
     replyText = ""
@@ -245,11 +247,9 @@ Panel {
     if (listSearchField) listSearchField.text = ""
     mailboxId = "inbox"
     listCursorTouched = false
-    ensureSelection()
-  }
-
-  function resetAccounts() {
-    applyAccountList(Mock.sampleAccounts())
+    inbox = []
+    if (liveMail) mail.refresh(true)
+    else ensureSelection()
   }
 
   function applyAccountList(list) {
@@ -266,7 +266,7 @@ Panel {
       inbox = []
       mail.start()
     } else {
-      resetAccounts()
+      applyAccountList([])
     }
   }
 
@@ -809,59 +809,47 @@ Panel {
     var subject = String(composeSubject || "").replace(/^\s+|\s+$/g, "")
     var body = String(composeBody || "").replace(/^\s+|\s+$/g, "")
     if (to === "" && cc === "" && bcc === "" && subject === "" && body === "" && outgoingPaths().length === 0) return
-    if (liveMail) {
-      var extra = {
-        account: composeAccountId(),
-        toList: Model.splitAddresses(composeTo),
-        ccList: Model.splitAddresses(composeCc),
-        bccList: Model.splitAddresses(composeBcc),
-        subject: composeSubject,
-        body: composeBody,
-        files: outgoingPaths()
-      }
-      if (!composing && mailboxId === "drafts" && selected) {
-        extra.uids = mail.mailboxUids(selected)
-        extra.items = selected.items || []
-        extra.conv = selected.id
-      }
-      mail.saveDraft(extra)
-      return
+    if (!liveMail) return
+    var extra = {
+      account: composeAccountId(),
+      toList: Model.splitAddresses(composeTo),
+      ccList: Model.splitAddresses(composeCc),
+      bccList: Model.splitAddresses(composeBcc),
+      subject: composeSubject,
+      body: composeBody,
+      files: outgoingPaths()
     }
-    inbox = Model.startConversation(inbox, accountId, composeTo, composeSubject, composeBody, "drafts")
-    finishDraft()
+    if (!composing && mailboxId === "drafts" && selected) {
+      extra.uids = mail.mailboxUids(selected)
+      extra.items = selected.items || []
+      extra.conv = selected.id
+    }
+    mail.saveDraft(extra)
   }
 
   function sendReply() {
     if (!selected || composeBusy()) return
     var body = String(replyText || "").replace(/^\s+|\s+$/g, "")
     if (body === "" && outgoingPaths().length === 0) return
-    if (liveMail) {
-      var account = Model.accountById(accounts, selected.accountId)
-      var to = replyToLabel
-      if (to === "") {
-        mail.sendError = "no recipient"
-        return
-      }
-      var headers = Model.replyHeaders(selected)
-      mail.sendMail({
-        account: selected.accountId,
-        mailbox: selected.mailbox || mailboxId,
-        toList: Model.splitAddresses(to),
-        ccList: Model.splitAddresses(replyCcLabel),
-        subject: Model.replySubject(selected.subject),
-        body: replyText,
-        inReplyTo: headers.inReplyTo,
-        references: headers.references,
-        files: outgoingPaths(),
-        conv: selected.id
-      })
+    if (!liveMail) return
+    var to = replyToLabel
+    if (to === "") {
+      mail.sendError = "no recipient"
       return
     }
-    var account = Model.accountById(accounts, selected.accountId)
-    inbox = Model.appendReply(inbox, selected.id, replyText, account ? account.email : "")
-    replyText = ""
-    replyOpen = false
-    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+    var headers = Model.replyHeaders(selected)
+    mail.sendMail({
+      account: selected.accountId,
+      mailbox: selected.mailbox || mailboxId,
+      toList: Model.splitAddresses(to),
+      ccList: Model.splitAddresses(replyCcLabel),
+      subject: Model.replySubject(selected.subject),
+      body: replyText,
+      inReplyTo: headers.inReplyTo,
+      references: headers.references,
+      files: outgoingPaths(),
+      conv: selected.id
+    })
   }
 
   function markComposeDirty() {
@@ -982,6 +970,10 @@ Panel {
   }
 
   function beginCompose() {
+    if (!liveMail) {
+      openSettings()
+      return
+    }
     composing = true
     forwarding = false
     pendingForward = false
@@ -1086,32 +1078,26 @@ Panel {
     var body = String(composeBody || "").replace(/^\s+|\s+$/g, "")
     var files = outgoingPaths()
     if ((to === "" && cc === "" && bcc === "") || (body === "" && files.length === 0)) return
-    if (liveMail) {
-      var recips = Model.splitAddresses(composeTo)
-      var ccList = Model.splitAddresses(composeCc)
-      var bccList = Model.splitAddresses(composeBcc)
-      if (!recips.length && !ccList.length && !bccList.length) return
-      var extra = {
-        account: composeAccountId(),
-        toList: recips,
-        ccList: ccList,
-        bccList: bccList,
-        subject: composeSubject,
-        body: composeBody,
-        files: files
-      }
-      if (!composing && mailboxId === "drafts" && selected) {
-        extra.uids = mail.mailboxUids(selected)
-        extra.items = selected.items || []
-        extra.conv = selected.id
-      }
-      mail.sendMail(extra)
-      return
+    if (!liveMail) return
+    var recips = Model.splitAddresses(composeTo)
+    var ccList = Model.splitAddresses(composeCc)
+    var bccList = Model.splitAddresses(composeBcc)
+    if (!recips.length && !ccList.length && !bccList.length) return
+    var extra = {
+      account: composeAccountId(),
+      toList: recips,
+      ccList: ccList,
+      bccList: bccList,
+      subject: composeSubject,
+      body: composeBody,
+      files: files
     }
-    inbox = Model.startConversation(inbox, accountId, composeTo, composeSubject, composeBody)
-    mailboxId = "inbox"
-    if (visibleInbox.length > 0) selectedId = visibleInbox[0].id
-    cancelCompose()
+    if (!composing && mailboxId === "drafts" && selected) {
+      extra.uids = mail.mailboxUids(selected)
+      extra.items = selected.items || []
+      extra.conv = selected.id
+    }
+    mail.sendMail(extra)
   }
 
   function openSettings() {
@@ -2819,7 +2805,7 @@ Panel {
               TextField {
                 id: accFromNameField
                 width: parent.width
-                placeholderText: "Roy McKenzie"
+                placeholderText: "Your name"
                 foreground: root.contentForeground
                 font.family: root.contentFontFamily
                 onTextChanged: root.patchEditing("fromName", text)
