@@ -390,6 +390,31 @@ class TestImapParsing(unittest.TestCase):
         self.assertEqual(rows[0]["size"], 441)
         self.assertFalse(rows[0]["unread"])
 
+    def test_fetch_body_items_is_ranged(self):
+        spec = mail.fetch_body_items()
+        self.assertIn(f"BODY.PEEK[]<0.{mail.MAX_MESSAGE_BYTES + 1}>", spec)
+        self.assertNotIn("RFC822", spec)
+        self.assertNotRegex(spec, r"BODY\.PEEK\[\](?!<)")
+
+    def test_body_overflows_limit(self):
+        old = mail.MAX_MESSAGE_BYTES
+        mail.MAX_MESSAGE_BYTES = 8
+        try:
+            self.assertFalse(mail.body_overflows_limit(b"12345678"))
+            self.assertTrue(mail.body_overflows_limit(b"123456789"))
+            self.assertIn("<0.9>", mail.fetch_body_items())
+        finally:
+            mail.MAX_MESSAGE_BYTES = old
+
+    def test_parse_fetch_partial_body(self):
+        data = [
+            (b"1 (UID 4 FLAGS () BODY[]<0> {9}", b"012345678"),
+            b")",
+        ]
+        rows = mail.parse_fetch_data(data)
+        self.assertEqual(rows[0]["uid"], 4)
+        self.assertEqual(rows[0]["body"], b"012345678")
+
     def test_contacts_skip_self_and_prefer_inbox_from(self):
         accounts = [{"email": "you@example.com"}]
         rows = [

@@ -30,7 +30,6 @@ FETCH_HEADERS = (
     "BODY.PEEK[HEADER.FIELDS (FROM TO CC BCC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO)])"
 )
 FETCH_SIZE = "(UID RFC822.SIZE FLAGS)"
-FETCH_BODY = "(FLAGS BODY.PEEK[])"
 
 MAILBOX_CANDIDATES = {
     "archive": ["Archive", "Archives", "INBOX.Archive", "[Gmail]/All Mail"],
@@ -1340,6 +1339,18 @@ def save_list_cache(conversations: list[dict[str, Any]], contacts: list[dict[str
 # --- MIME messages -----------------------------------------------------------
 
 
+def max_fetch_octets() -> int:
+    return MAX_MESSAGE_BYTES + 1
+
+
+def fetch_body_items() -> str:
+    return f"(FLAGS BODY.PEEK[]<0.{max_fetch_octets()}>)"
+
+
+def body_overflows_limit(raw: bytes) -> bool:
+    return len(raw) > MAX_MESSAGE_BYTES
+
+
 def cap_text(text: str) -> str:
     s = str(text or "")
     if len(s) <= MAX_TEXT_CHARS:
@@ -1960,17 +1971,15 @@ def fetch_cmd(state: State, req: dict[str, Any]) -> dict[str, Any]:
                     fetch_uids.append(uid)
             if fetch_uids:
                 spec = ",".join(str(u) for u in fetch_uids)
-                items = imap_fetch(imap, spec, FETCH_BODY, True)
-                if not items:
-                    items = imap_fetch(imap, spec, "(FLAGS RFC822)", True)
+                items = imap_fetch(imap, spec, fetch_body_items(), True)
                 for item in items:
                     body = item.get("body") or b""
                     if not body:
                         continue
-                    if len(body) > MAX_MESSAGE_BYTES:
+                    if body_overflows_limit(body):
                         messages.append(
                             stub_oversized_message(
-                                account, role, item["uid"], bool(item.get("unread")), item
+                                account, role, item["uid"], bool(item.get("unread")), None
                             )
                         )
                         continue
@@ -2135,13 +2144,11 @@ def attachment_cmd(state: State, req: dict[str, Any]) -> dict[str, Any]:
         size = int((sizes[0].get("size") if sizes else 0) or 0)
         if size > MAX_MESSAGE_BYTES:
             raise Error("message too large")
-        items = imap_fetch(imap, str(uid), FETCH_BODY, True)
-        if not items:
-            items = imap_fetch(imap, str(uid), "(FLAGS RFC822)", True)
+        items = imap_fetch(imap, str(uid), fetch_body_items(), True)
         raw = next((item.get("body") for item in items if item.get("body")), b"")
         if not raw:
             raise Error("couldn't fetch message")
-        if len(raw) > MAX_MESSAGE_BYTES:
+        if body_overflows_limit(raw):
             raise Error("message too large")
         msg = BytesParser(policy=policy.default).parsebytes(raw)
         return extract_part(msg, index)
