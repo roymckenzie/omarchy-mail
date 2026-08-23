@@ -127,7 +127,7 @@ Panel {
     return visibleInbox.length === 1 ? "1 conversation" : visibleInbox.length + " conversations"
   }
   readonly property string emptyLabel: {
-    if (!liveMail) return "Add an account to get started."
+    if (!liveMail) return "Add an account in settings to get started."
     if (liveMail && mail.lastError !== "") return "Couldn't load mail."
     if (liveMail && mail.loading) return trimmedQuery !== "" ? "Searching…" : "Loading…"
     if (trimmedQuery !== "" && visibleInbox.length === 0)
@@ -1790,17 +1790,31 @@ Panel {
             }
           }
 
-          Text {
+          Column {
             visible: root.visibleInbox.length === 0
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: listChrome.bottom
             anchors.topMargin: Style.space(36)
-            text: root.emptyLabel
-            color: root.dim
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.body
-            horizontalAlignment: Text.AlignHCenter
+            spacing: Style.space(12)
+
+            Text {
+              width: parent.width
+              text: root.emptyLabel
+              color: root.dim
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.body
+              wrapMode: Text.WordWrap
+              horizontalAlignment: Text.AlignHCenter
+            }
+
+            Button {
+              visible: !root.liveMail
+              anchors.horizontalCenter: parent.horizontalCenter
+              text: "Settings"
+              foreground: root.contentForeground
+              onClicked: root.openSettings()
+            }
           }
 
           Item {
