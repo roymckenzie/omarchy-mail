@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Pick files in a subprocess so the chooser cannot crash Quickshell."""
+
+import os
+import sys
+from urllib.parse import unquote, urlparse
+
+
+def paths_from_uris(uris):
+    out = []
+    for uri in uris or []:
+        if not uri:
+            continue
+        if uri.startswith("file:"):
+            out.append(unquote(urlparse(uri).path))
+        else:
+            out.append(uri)
+    return out
+
+
+def pick_portal():
+    from gi.repository import Gio, GLib
+
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    sender = bus.get_unique_name()[1:].replace(".", "_")
+    token = f"mail{os.getpid()}"
+    request_path = f"/org/freedesktop/portal/desktop/request/{sender}/{token}"
+    loop = GLib.MainLoop()
+    paths = []
+
+    def on_response(_conn, _sender, _path, _iface, _signal, params):
+        response, values = params.unpack()
+        if response == 0:
+            paths.extend(paths_from_uris(values.get("uris", [])))
+        loop.quit()
+
+    bus.signal_subscribe(
+        "org.freedesktop.portal.Desktop",
+        "org.freedesktop.portal.Request",
+        "Response",
+        request_path,
+        None,
+        Gio.DBusSignalFlags.NONE,
+        on_response,
+    )
+    proxy = Gio.DBusProxy.new_sync(
+        bus,
+        Gio.DBusProxyFlags.NONE,
+        None,
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.FileChooser",
+        None,
+    )
+    options = {
+        "handle_token": GLib.Variant("s", token),
+        "multiple": GLib.Variant("b", True),
+        "modal": GLib.Variant("b", False),
+    }
+    proxy.call_sync(
+        "OpenFile",
+        GLib.Variant("(ssa{sv})", ("", "Attach files", options)),
+        Gio.DBusCallFlags.NONE,
+        20000,
+        None,
+    )
+    loop.run()
+    return paths
+
+
+def pick_gtk():
+    import gi
+
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gtk
+
+    dialog = Gtk.FileChooserNative.new(
+        "Attach files", None, Gtk.FileChooserAction.OPEN, "_Attach", "_Cancel"
+    )
+    dialog.set_select_multiple(True)
+    paths = []
+    if dialog.run() == Gtk.ResponseType.ACCEPT:
+        paths = list(dialog.get_filenames() or [])
+    dialog.destroy()
+    while Gtk.events_pending():
+        Gtk.main_iteration()
+    return paths
+
+
+def main():
+    try:
+        paths = pick_portal()
+    except Exception as err:
+        sys.stderr.write(f"portal picker failed: {err}\n")
+        try:
+            paths = pick_gtk()
+        except Exception as gtk_err:
+            sys.stderr.write(f"gtk picker failed: {gtk_err}\n")
+            return 1
+    for path in paths:
+        if path:
+            sys.stdout.write(path + "\n")
+    sys.stdout.flush()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

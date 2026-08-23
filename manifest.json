@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.roymckenzie.omarchy-mail",
+  "name": "Mail",
+  "version": "1.0.0",
+  "author": "Roy McKenzie",
+  "license": "MIT",
+  "description": "Unread count on the bar and a two-pane IMAP client: read, search, compose, reply, and file mail.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Mail",
+    "description": "Inbox conversations, a reading pane, and compose from the Omarchy bar.",
+    "category": "Communication",
+    "aliases": [
+      "mail",
+      "inbox",
+      "email"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

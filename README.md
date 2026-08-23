@@ -1,0 +1,113 @@
+# Mail
+
+Bar widget for [Omarchy](https://omarchy.org/). Unread count on the bar, two-pane
+IMAP client in the panel.
+
+Plugin id: `io.github.roymckenzie.omarchy-mail`
+
+With a saved account, the helper lists the latest 50 envelopes over IMAP,
+searches on the server, and fetches bodies when you open a thread. Envelope
+lists are cached on disk so the panel can open immediately; IMAP IDLE
+refreshes in the background and new mail posts an Omarchy notification.
+Until an account is saved, the panel shows demo mail.
+
+## Install
+
+```sh
+omarchy plugin add https://github.com/roymckenzie/omarchy-mail.git --enable
+```
+
+`--enable` places the widget on the right of the bar. Open it with a left
+click, then add a real IMAP/SMTP account (gear or `s`). Do not save the demo
+accounts.
+
+The helper binary is `bin/omarchy-mail-helper`. `omarchy plugin add` does not
+build it. If that file is missing or not executable:
+
+```sh
+cd ~/.config/omarchy/plugins/io.github.roymckenzie.omarchy-mail
+./build.sh
+omarchy restart shell
+```
+
+## Requirements
+
+- [Omarchy](https://omarchy.org/) with `omarchy-shell`
+- An IMAP and SMTP mailbox (host, ports, username, password)
+- `secret-tool` (`libsecret`) for passwords in the user keyring
+- `python3`, plus `xdg-desktop-portal` (GTK 3 fallback) for the attach picker
+- `rustc`, `cargo`, and OpenSSL only when building the helper with `./build.sh`
+
+The plugin does not use sudo. It talks to your mail hosts from the helper
+process, stores account metadata in
+`~/.local/state/omarchy/settings/omarchy-mail.json` (mode 600), and caches
+envelopes in `~/.local/state/omarchy/mail/cache/`. Passwords never go in that
+file.
+
+## Configure
+
+```sh
+omarchy bar move io.github.roymckenzie.omarchy-mail --section right
+```
+
+A Hyprland bind of Super+M can toggle the panel (not installed by the plugin):
+
+```lua
+o.bind("SUPER + M", "Mail", "omarchy-shell shell toggle io.github.roymckenzie.omarchy-mail")
+```
+
+## Usage
+
+- Left click opens the panel
+- `?` shortcuts
+- `/` search (IMAP Subject/From/To/Cc, then BODY if nothing matches)
+- Gear (or `s`) opens account settings
+- Mailbox icon left of the account chips (Inbox / Sent / Drafts / Archive / Junk / Trash)
+- `j` / `k` move, `h` / `l` list or message, `Enter` open
+- `r` reply, `a` reply all, `f` forward, `c` compose
+- `e` archive (or move back to Inbox), `!` junk (or not junk from Junk)
+- `x` trash (deletes forever from Sent, Trash, and Junk), `u` toggle unread
+- `g i` / `g s` / `g d` / `g e` / `g b` / `g t` jump to inbox, sent, drafts, archive, junk, trash
+- `Esc` hides address suggestions, then cancels compose/reply, then closes the panel
+- `Ctrl+Enter` sends, `Ctrl+S` saves a draft
+- Middle click (or `0`) reloads the mock inbox
+
+Reply, reply-all, forward, and compose are plaintext. Reply-all puts the sender
+in To and everyone else (minus you) in Cc. Compose Cc/Bcc fields expand from
+chips on the To row. Forward quotes the thread and can carry its attachments.
+An in-progress compose or reply is kept if you close the panel.
+
+Attachments on a thread open with a click and save to Downloads on right-click.
+Compose and reply attach through an out-of-process portal picker (the panel
+closes for the dialog, then restores the draft). Compose sends over SMTP and
+appends a copy to Sent. Save Draft appends to the account Drafts folder.
+Opening a draft uses the compose pane; Sent is a reading pane.
+
+The To/Cc/Bcc fields autocomplete from addresses harvested from IMAP envelopes
+(From on inbox, To/Cc on sent). HTML mail is rendered as a small block model
+(paragraph, heading, quote, list) — not a web view.
+
+## Local development
+
+```sh
+git clone https://github.com/roymckenzie/omarchy-mail.git
+ln -sfn "$PWD/omarchy-mail" \
+  ~/.config/omarchy/plugins/io.github.roymckenzie.omarchy-mail
+omarchy plugin enable io.github.roymckenzie.omarchy-mail --section right
+```
+
+Saving QML reloads the plugin. After rebuilding the helper, run
+`omarchy restart shell` if the running helper is still the old binary.
+
+## Remove
+
+```sh
+omarchy plugin remove io.github.roymckenzie.omarchy-mail
+```
+
+This removes the plugin. Account settings, the keyring entry, and the envelope
+cache are left in place.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
