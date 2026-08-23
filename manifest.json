@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "Roy McKenzie",
   "license": "MIT",
-  "description": "Unread count on the bar and a two-pane IMAP client: read, search, compose, reply, and file mail.",
+  "description": "Two-pane IMAP client on the bar: unread count, conversations, and compose.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Mail",
-    "description": "Inbox conversations, a reading pane, and compose from the Omarchy bar.",
+    "description": "Two-pane IMAP client on the bar: unread count, conversations, and compose.",
     "category": "Communication",
     "aliases": [
       "mail",
