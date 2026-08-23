@@ -26,7 +26,7 @@ FETCH_HEADERS = (
     "(UID FLAGS INTERNALDATE "
     "BODY.PEEK[HEADER.FIELDS (FROM TO CC BCC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO)])"
 )
-FETCH_BODY = "(BODY.PEEK[])"
+FETCH_BODY = "(FLAGS BODY.PEEK[])"
 
 MAILBOX_CANDIDATES = {
     "archive": ["Archive", "Archives", "INBOX.Archive", "[Gmail]/All Mail"],
@@ -1422,7 +1422,9 @@ def part_text(msg) -> tuple[str, bool]:
     return "", False
 
 
-def parse_message(account: dict[str, Any], mailbox: str, uid: int, raw: bytes) -> dict[str, Any]:
+def parse_message(
+    account: dict[str, Any], mailbox: str, uid: int, raw: bytes, unread: bool = False
+) -> dict[str, Any]:
     msg = BytesParser(policy=policy.default).parsebytes(raw)
     from_header = str(msg.get("From") or "")
     from_name, from_email = parse_from(from_header)
@@ -1452,6 +1454,7 @@ def parse_message(account: dict[str, Any], mailbox: str, uid: int, raw: bytes) -
         "text": text,
         "blocks": text_to_blocks(text),
         "attachments": collect_attachments(msg),
+        "unread": bool(unread),
     }
 
 
@@ -1858,11 +1861,15 @@ def fetch_cmd(state: State, req: dict[str, Any]) -> dict[str, Any]:
             uid_set = ",".join(str(u) for u in uids)
             items = imap_fetch(imap, uid_set, FETCH_BODY, True)
             if not items:
-                items = imap_fetch(imap, uid_set, "(RFC822)", True)
+                items = imap_fetch(imap, uid_set, "(FLAGS RFC822)", True)
             for item in items:
                 body = item.get("body") or b""
                 if body:
-                    messages.append(parse_message(account, role, item["uid"], body))
+                    messages.append(
+                        parse_message(
+                            account, role, item["uid"], body, bool(item.get("unread"))
+                        )
+                    )
             if role == viewed:
                 seen_sets.append((mailbox, uids))
         for mailbox, uids in seen_sets:

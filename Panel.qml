@@ -33,6 +33,7 @@ Panel {
   property string pendingSelectId: ""
   property int pendingSelectIndex: -1
   property var expandedIds: ({})
+  property string expandedSeedId: ""
   property string settingsAccountId: ""
   property bool settingsOpen: false
   property bool settingsHydrating: false
@@ -212,13 +213,13 @@ Panel {
   readonly property string mailSendError: mail.sendError
   readonly property bool filePickerBusy: filePicker.running || pickStartTimer.running
 
-  readonly property var composeToField: composePane.composeToField
-  readonly property var composeCcField: composePane.composeCcField
-  readonly property var composeBccField: composePane.composeBccField
-  readonly property var composeSubjectField: composePane.composeSubjectField
-  readonly property var composeBodyField: composePane.composeBodyField
-  readonly property var composeSuggestPopup: composePane.composeSuggestPopup
-  readonly property var addrBlock: composePane.addrBlock
+  readonly property var composeToField: composePaneItem.composeToField
+  readonly property var composeCcField: composePaneItem.composeCcField
+  readonly property var composeBccField: composePaneItem.composeBccField
+  readonly property var composeSubjectField: composePaneItem.composeSubjectField
+  readonly property var composeBodyField: composePaneItem.composeBodyField
+  readonly property var composeSuggestPopup: composePaneItem.composeSuggestPopup
+  readonly property var addrBlock: composePaneItem.addrBlock
   readonly property var accNameField: settingsPane.accNameField
   readonly property var accFromNameField: settingsPane.accFromNameField
   readonly property var accEmailField: settingsPane.accEmailField
@@ -455,11 +456,14 @@ Panel {
       if (!selected) return
       paneFocus = "read"
       openSelected()
-      if (composePane)
+      if (root.composePane)
         Qt.callLater(function() { composeBodyField.forceActiveFocus() })
+      else if (keyCatcher)
+        Qt.callLater(function() { keyCatcher.forceActiveFocus() })
       return
     }
     paneFocus = "list"
+    if (keyCatcher) Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
   function scrollReadPane(dy) {
@@ -478,15 +482,25 @@ Panel {
   }
 
   function messageKey(message, index) {
-    if (message && message.id) return String(message.id)
-    return "idx-" + index
+    return Model.messageKey(message, index)
+  }
+
+  function seedExpanded(conversation) {
+    if (!conversation || conversation.id !== selectedId) return
+    var messages = conversation.messages || []
+    if (!messages.length) return
+    if (expandedSeedId === conversation.id) return
+    expandedIds = Model.defaultExpandedIds(messages)
+    expandedSeedId = conversation.id
   }
 
   function toggleMessageExpanded(message, index) {
     var key = messageKey(message, index)
     var next = Model.copy(expandedIds)
-    if (next[key]) delete next[key]
-    else next[key] = true
+    var messages = selected && selected.messages ? selected.messages : []
+    var latest = messages.length <= 1 || index === messages.length - 1
+    var open = next[key] === true || (next[key] !== false && Model.messageOpenByDefault(message, latest))
+    next[key] = !open
     expandedIds = next
   }
 
@@ -1434,6 +1448,8 @@ Panel {
   }
   onSelectedIdChanged: {
     expandedIds = ({})
+    expandedSeedId = ""
+    seedExpanded(selected)
     if (threadFlick) threadFlick.contentY = 0
     if (composeHold) {
       composeLoadedId = selectedId
@@ -1443,6 +1459,7 @@ Panel {
     syncComposeFromSelection()
   }
   onSelectedChanged: {
+    seedExpanded(selected)
     syncComposeFromSelection()
     if (pendingForward && selected && !conversationNeedsFetch(selected)) {
       pendingForward = false
@@ -1995,7 +2012,7 @@ Panel {
           }
 
           ComposePane {
-            id: composePane
+            id: composePaneItem
             host: root
             anchors.fill: parent
           }
@@ -2009,20 +2026,18 @@ Panel {
 
             Item {
               width: parent.width
-              height: Math.max(threadTitle.implicitHeight, actionRow.implicitHeight)
+              height: Math.max(threadTitle.height, actionRow.implicitHeight)
 
-              Text {
+              MailBodyText {
                 id: threadTitle
+                host: root
                 anchors.left: parent.left
                 anchors.right: actionRow.left
                 anchors.rightMargin: Style.space(12)
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.selected ? root.selected.subject : ""
-                color: root.contentForeground
-                font.family: root.contentFontFamily
+                plain: root.selected ? (root.selected.subject || "") : ""
                 font.pixelSize: Style.font.heading
                 font.bold: true
-                wrapMode: Text.WordWrap
               }
 
               Row {
@@ -2115,13 +2130,14 @@ Panel {
               height: parent.height - y - (root.replyOpen ? replyBox.height + Style.space(10) : 0)
               contentWidth: width
               contentHeight: threadColumn.implicitHeight
-              interactive: contentHeight > height
+              // Wheel and j/k still scroll; drag is for selecting body text.
+              interactive: false
               ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
               Column {
                 id: threadColumn
                 width: threadFlick.width
-                spacing: Style.space(12)
+                spacing: 0
 
                 Text {
                   visible: root.liveMail && root.selected && (!root.selected.messages || root.selected.messages.length === 0)

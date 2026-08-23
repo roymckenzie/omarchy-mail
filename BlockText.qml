@@ -5,16 +5,16 @@ import qs.Ui
 import "Model.js" as Model
 
 Column {
+  id: pane
   property var host
-    property var block
+    property var run
     property bool quoteOpen: false
     spacing: Style.space(4)
 
-    readonly property string bodyText: block.type === "list"
-      ? String(block.text).split("\n").map(function(line) { return "·  " + line }).join("\n")
-      : String(block.text || "")
-    readonly property bool isQuote: block.type === "quote" || block.type === "history"
-    readonly property bool quoteCollapsible: block.type === "history"
+    readonly property var block: run && run.block ? run.block : null
+    readonly property string bodyText: Model.blockPlainText(block)
+    readonly property bool isQuote: run && run.kind === "quote"
+    readonly property bool quoteCollapsible: !!(block && block.type === "history")
     readonly property bool quoteExpanded: isQuote && (!quoteCollapsible || quoteOpen)
 
     CursorSurface {
@@ -102,37 +102,23 @@ Column {
 
       Rectangle {
         width: Style.space(2)
-        height: quoteText.implicitHeight
+        height: quoteText.height
         color: Color.accent
       }
 
-      Text {
+      MailBodyText {
         id: quoteText
+        host: pane.host
         width: parent.width - Style.space(12)
-        text: Model.formatBlock(bodyText)
-        textFormat: Text.StyledText
-        color: host.dim
-        linkColor: Color.accent
-        font.family: host.contentFontFamily
-        font.pixelSize: Style.font.body
-        wrapMode: Text.WordWrap
-        onLinkActivated: function(link) { host.openLink(link) }
-        HoverHandler { cursorShape: quoteText.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor }
+        html: Model.formatBlock(bodyText)
+        color: pane.host ? pane.host.dim : Color.foreground
       }
     }
 
-    Text {
+    MailBodyText {
       visible: !isQuote
+      host: pane.host
       width: parent.width
-      text: Model.formatBlock(bodyText)
-      textFormat: Text.StyledText
-      color: host.contentForeground
-      linkColor: Color.accent
-      font.family: host.contentFontFamily
-      font.pixelSize: block.type === "heading" ? Style.font.title : Style.font.body
-      font.bold: block.type === "heading"
-      wrapMode: Text.WordWrap
-      onLinkActivated: function(link) { host.openLink(link) }
-      HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor }
+      html: Model.formatBodyRun(run && run.blocks ? run.blocks : [])
     }
   }

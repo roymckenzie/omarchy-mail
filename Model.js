@@ -915,6 +915,70 @@ function formatBlock(text) {
   return s.replace(/\n/g, "<br/>")
 }
 
+function isQuoteBlock(block) {
+  return !!(block && (block.type === "quote" || block.type === "history"))
+}
+
+function blockPlainText(block) {
+  var text = String(block && block.text || "")
+  if (block && block.type === "list")
+    return text.split("\n").map(function(line) { return "·  " + line }).join("\n")
+  return text
+}
+
+function formatBodyRun(blocks) {
+  var parts = []
+  for (var i = 0; i < (blocks || []).length; i++) {
+    var block = blocks[i]
+    if (!block) continue
+    var html = formatBlock(blockPlainText(block))
+    if (block.type === "heading") html = "<b>" + html + "</b>"
+    if (html !== "") parts.push(html)
+  }
+  return parts.join("<br/><br/>")
+}
+
+function messageOpenByDefault(message, isLatest) {
+  if (isLatest) return true
+  return !!(message && message.unread)
+}
+
+function messageKey(message, index) {
+  if (message && message.id) return String(message.id)
+  return "idx-" + index
+}
+
+function defaultExpandedIds(messages) {
+  var next = {}
+  var list = messages || []
+  for (var i = 0; i < list.length; i++) {
+    var latest = list.length <= 1 || i === list.length - 1
+    next[messageKey(list[i], i)] = messageOpenByDefault(list[i], latest)
+  }
+  return next
+}
+
+function bodyRuns(blocks) {
+  var runs = []
+  var current = null
+  for (var i = 0; i < (blocks || []).length; i++) {
+    var block = blocks[i]
+    if (!block) continue
+    if (isQuoteBlock(block)) {
+      if (current) {
+        runs.push(current)
+        current = null
+      }
+      runs.push({ kind: "quote", block: block })
+    } else {
+      if (!current) current = { kind: "body", blocks: [] }
+      current.blocks.push(block)
+    }
+  }
+  if (current) runs.push(current)
+  return runs
+}
+
 function pluginFile(url) {
   var value = String(url || "")
   if (value.indexOf("file://") === 0) {

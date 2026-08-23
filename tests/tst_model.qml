@@ -99,7 +99,60 @@ TestCase {
     compare(Model.filtered(inbox, "all", "inbox", "nope").length, 0)
   }
 
+  function test_messageOpenByDefault() {
+    compare(Model.messageOpenByDefault({ unread: false }, true), true)
+    compare(Model.messageOpenByDefault({ unread: true }, true), true)
+    compare(Model.messageOpenByDefault({ unread: true }, false), true)
+    compare(Model.messageOpenByDefault({ unread: false }, false), false)
+    compare(Model.messageOpenByDefault({}, false), false)
+  }
+
+  function test_defaultExpandedIds_freezes_unread_at_open() {
+    var ids = Model.defaultExpandedIds([
+      { id: "a", unread: true },
+      { id: "b", unread: false },
+      { id: "c", unread: false }
+    ])
+    compare(ids.a, true)
+    compare(ids.b, false)
+    compare(ids.c, true)
+    var afterRead = Model.defaultExpandedIds([
+      { id: "a", unread: false },
+      { id: "b", unread: false },
+      { id: "c", unread: false }
+    ])
+    compare(afterRead.a, false)
+    compare(afterRead.c, true)
+  }
+
   function test_escapeHtml() {
     compare(Model.escapeHtml("a <b> & c"), "a &lt;b&gt; &amp; c")
+  }
+
+  function test_bodyRuns_joins_paragraphs() {
+    var runs = Model.bodyRuns([
+      { type: "p", text: "Hello" },
+      { type: "heading", text: "Title" },
+      { type: "p", text: "World" },
+      { type: "history", text: "old thread" },
+      { type: "p", text: "After" }
+    ])
+    compare(runs.length, 3)
+    compare(runs[0].kind, "body")
+    compare(runs[0].blocks.length, 3)
+    compare(runs[1].kind, "quote")
+    compare(runs[1].block.type, "history")
+    compare(runs[2].kind, "body")
+    compare(runs[2].blocks.length, 1)
+  }
+
+  function test_formatBodyRun_keeps_paragraphs_in_one_document() {
+    var html = Model.formatBodyRun([
+      { type: "p", text: "Hello" },
+      { type: "p", text: "World" }
+    ])
+    verify(html.indexOf("Hello") >= 0)
+    verify(html.indexOf("World") >= 0)
+    verify(html.indexOf("<br") >= 0)
   }
 }

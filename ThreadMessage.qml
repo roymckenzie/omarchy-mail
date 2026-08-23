@@ -13,28 +13,30 @@ Column {
     readonly property bool isLatest: messageCount <= 1 || messageIndex === messageCount - 1
     readonly property bool expanded: {
       var ids = host.expandedIds
-      return isLatest || ids[host.messageKey(message, messageIndex)] === true
+      var key = host.messageKey(message, messageIndex)
+      if (ids[key] === true) return true
+      if (ids[key] === false) return false
+      return Model.messageOpenByDefault(message, isLatest)
     }
     readonly property string address: host.messageAddress(message)
     readonly property bool showAddress: address !== ""
       && address.toLowerCase() !== String(message.from || "").toLowerCase()
     readonly property string toLabel: Model.formatAddressList(message && message.to, true)
     readonly property string ccLabel: Model.formatAddressList(message && message.cc, true)
-    property bool toOpen: false
-    property bool ccOpen: false
-    spacing: expanded ? Style.space(10) : Style.space(4)
+    spacing: 0
 
-    onMessageChanged: {
-      toOpen = false
-      ccOpen = false
+    Item {
+      width: parent.width
+      height: messageIndex === 0 ? 0 : Math.max(0, Style.space(12) - 2)
     }
 
     CursorSurface {
       visible: !expanded
       width: parent.width
       hasCursor: collapsedMouse.containsMouse
-      current: false
+      current: true
       foreground: host.contentForeground
+      currentFill: Style.normalFillFor(host.contentForeground, Color.accent)
       implicitHeight: Math.max(collapsedFrom.implicitHeight, collapsedWhen.implicitHeight) + Style.space(12)
 
       MouseArea {
@@ -43,17 +45,6 @@ Column {
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: host.toggleMessageExpanded(message, messageIndex)
-      }
-
-      Text {
-        id: collapsedChevron
-        anchors.left: parent.left
-        anchors.leftMargin: Style.space(8)
-        anchors.verticalCenter: parent.verticalCenter
-        text: "󰅂"
-        color: host.dim
-        font.family: host.contentFontFamily
-        font.pixelSize: Style.font.body
       }
 
       Text {
@@ -69,8 +60,8 @@ Column {
 
       Text {
         id: collapsedFrom
-        anchors.left: collapsedChevron.right
-        anchors.leftMargin: Style.space(6)
+        anchors.left: parent.left
+        anchors.leftMargin: Style.space(8)
         anchors.verticalCenter: parent.verticalCenter
         width: Math.min(implicitWidth, Math.max(Style.space(72), parent.width * 0.28))
         text: message.from
@@ -106,167 +97,142 @@ Column {
     Column {
       visible: expanded
       width: parent.width
-      spacing: Style.space(2)
+      spacing: Style.space(10)
 
-      Item {
+      Column {
         width: parent.width
-        height: Math.max(fromText.implicitHeight, stampText.implicitHeight)
+        spacing: Style.space(2)
 
-        Text {
-          id: expandChevron
-          visible: !isLatest
-          anchors.left: parent.left
-          anchors.verticalCenter: parent.verticalCenter
-          text: "󰅀"
-          color: host.dim
-          font.family: host.contentFontFamily
-          font.pixelSize: Style.font.body
-        }
-
-        Text {
-          id: fromText
-          anchors.left: isLatest ? parent.left : expandChevron.right
-          anchors.leftMargin: isLatest ? 0 : Style.space(6)
-          anchors.verticalCenter: parent.verticalCenter
-          width: Math.min(implicitWidth, parent.width - stampText.implicitWidth - Style.space(12) - (isLatest ? 0 : expandChevron.implicitWidth + Style.space(6)))
-          text: message.from
-          color: host.senderColor(message)
-          font.family: host.contentFontFamily
-          font.pixelSize: Style.font.body
-          font.bold: true
-          elide: Text.ElideRight
-
-          MouseArea {
-            id: fromMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            acceptedButtons: Qt.NoButton
-          }
-
-          PanelToolTip {
-            visible: isLatest && showAddress && fromMouse.containsMouse
-            text: address
-            fontFamily: host.contentFontFamily
-            x: 0
-            y: fromText.height + Style.space(4)
-          }
-        }
-
-        Text {
-          id: stampText
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          text: Model.formatStamp(message.when)
-          color: host.dim
-          font.family: host.contentFontFamily
-          font.pixelSize: Style.font.bodySmall
-        }
-
-        MouseArea {
-          anchors.fill: parent
-          enabled: !isLatest
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: host.toggleMessageExpanded(message, messageIndex)
-        }
-      }
-
-      Text {
-        id: toText
-        visible: toLabel !== ""
-        width: parent.width
-        text: toOpen ? Model.formatAddressMultiline("To", message && message.to, true) : ("To  " + toLabel)
-        color: host.dim
-        font.family: host.contentFontFamily
-        font.pixelSize: Style.font.bodySmall
-        wrapMode: toOpen ? Text.Wrap : Text.NoWrap
-        elide: toOpen ? Text.ElideNone : Text.ElideRight
-
-        MouseArea {
-          anchors.fill: parent
-          enabled: toText.truncated || toOpen || (message.to && message.to.length > 1)
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: toOpen = !toOpen
-        }
-      }
-
-      Text {
-        id: ccText
-        visible: ccLabel !== ""
-        width: parent.width
-        text: ccOpen ? Model.formatAddressMultiline("Cc", message && message.cc, true) : ("Cc  " + ccLabel)
-        color: host.dim
-        font.family: host.contentFontFamily
-        font.pixelSize: Style.font.bodySmall
-        wrapMode: ccOpen ? Text.Wrap : Text.NoWrap
-        elide: ccOpen ? Text.ElideNone : Text.ElideRight
-
-        MouseArea {
-          anchors.fill: parent
-          enabled: ccText.truncated || ccOpen || (message.cc && message.cc.length > 1)
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: ccOpen = !ccOpen
-        }
-      }
-    }
-
-    Flow {
-      visible: expanded && message.attachments && message.attachments.length
-      width: parent.width
-      spacing: Style.space(6)
-
-      Repeater {
-        model: expanded ? (message.attachments || []) : []
-
-        Rectangle {
-          required property var modelData
-          implicitWidth: attachLabel.implicitWidth + Style.space(14)
-          implicitHeight: Math.max(Style.space(22), attachLabel.implicitHeight + Style.space(8))
-          radius: Style.cornerRadius
-          color: attachMouse.containsMouse
-            ? Style.hoverFillFor(host.contentForeground, Color.accent)
-            : Style.normalFillFor(host.contentForeground, Color.accent)
+        Item {
+          width: parent.width
+          height: Math.max(fromText.implicitHeight, stampText.implicitHeight)
 
           Text {
-            id: attachLabel
-            anchors.centerIn: parent
-            text: "󰁦  " + modelData.name + "  " + Model.formatBytes(modelData.size)
-            color: host.contentForeground
+            id: fromText
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.min(implicitWidth, parent.width - stampText.implicitWidth - Style.space(12))
+            text: message.from
+            color: host.senderColor(message)
+            font.family: host.contentFontFamily
+            font.pixelSize: Style.font.body
+            font.bold: true
+            elide: Text.ElideRight
+
+            MouseArea {
+              id: fromMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              acceptedButtons: Qt.NoButton
+            }
+
+            PanelToolTip {
+              visible: showAddress && fromMouse.containsMouse
+              text: address
+              fontFamily: host.contentFontFamily
+              x: 0
+              y: fromText.height + Style.space(4)
+            }
+          }
+
+          Text {
+            id: stampText
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: Model.formatStamp(message.when)
+            color: host.dim
             font.family: host.contentFontFamily
             font.pixelSize: Style.font.bodySmall
           }
 
           MouseArea {
-            id: attachMouse
             anchors.fill: parent
             hoverEnabled: true
-            acceptedButtons: Qt.LeftButton | Qt.RightButton
             cursorShape: Qt.PointingHandCursor
-            onClicked: function(mouse) {
-              host.openAttachment(message, modelData, mouse.button === Qt.RightButton ? "save" : "open")
+            onClicked: host.toggleMessageExpanded(message, messageIndex)
+          }
+        }
+
+        MailBodyText {
+          visible: toLabel !== ""
+          host: threadMessage.host
+          width: parent.width
+          color: threadMessage.host.dim
+          font.pixelSize: Style.font.bodySmall
+          plain: Model.formatAddressMultiline("To", message && message.to, true)
+        }
+
+        MailBodyText {
+          visible: ccLabel !== ""
+          host: threadMessage.host
+          width: parent.width
+          color: threadMessage.host.dim
+          font.pixelSize: Style.font.bodySmall
+          plain: Model.formatAddressMultiline("Cc", message && message.cc, true)
+        }
+      }
+
+      Flow {
+        visible: message.attachments && message.attachments.length
+        width: parent.width
+        spacing: Style.space(6)
+
+        Repeater {
+          model: message.attachments || []
+
+          Rectangle {
+            required property var modelData
+            implicitWidth: attachLabel.implicitWidth + Style.space(14)
+            implicitHeight: Math.max(Style.space(22), attachLabel.implicitHeight + Style.space(8))
+            radius: Style.cornerRadius
+            color: attachMouse.containsMouse
+              ? Style.hoverFillFor(host.contentForeground, Color.accent)
+              : Style.normalFillFor(host.contentForeground, Color.accent)
+
+            Text {
+              id: attachLabel
+              anchors.centerIn: parent
+              text: "󰁦  " + modelData.name + "  " + Model.formatBytes(modelData.size)
+              color: host.contentForeground
+              font.family: host.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+
+            MouseArea {
+              id: attachMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              acceptedButtons: Qt.LeftButton | Qt.RightButton
+              cursorShape: Qt.PointingHandCursor
+              onClicked: function(mouse) {
+                host.openAttachment(message, modelData, mouse.button === Qt.RightButton ? "save" : "open")
+              }
+            }
+
+            PanelToolTip {
+              visible: attachMouse.containsMouse
+              text: "Open · click   Save · right-click"
+              fontFamily: host.contentFontFamily
             }
           }
+        }
+      }
 
-          PanelToolTip {
-            visible: attachMouse.containsMouse
-            text: "Open · click   Save · right-click"
-            fontFamily: host.contentFontFamily
-          }
+      Repeater {
+        model: Model.bodyRuns(message.blocks || [])
+
+        BlockText {
+          required property var modelData
+          host: threadMessage.host
+          width: parent.width
+          run: modelData
         }
       }
     }
 
-    Repeater {
-      model: expanded ? (message.blocks || []) : []
-
-      BlockText {
-        required property var modelData
-        host: threadMessage.host
-        width: parent.width
-        block: modelData
-      }
+    Item {
+      width: parent.width
+      height: Math.max(0, Style.space(12) - 2)
     }
 
     PanelSeparator {
