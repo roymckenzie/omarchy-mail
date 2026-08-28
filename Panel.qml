@@ -37,7 +37,7 @@ Panel {
   property string settingsAccountId: ""
   property string settingsTab: "accounts"
   property string pluginName: "Mail"
-  property string pluginVersion: "1.1.0"
+  property string pluginVersion: "1.1.1"
   property string mailtoHandlerId: ""
   property string mailtoHandlerName: ""
   property string pluginUpdateStatus: ""
