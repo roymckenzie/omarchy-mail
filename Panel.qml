@@ -37,11 +37,9 @@ Panel {
   property string settingsAccountId: ""
   property string settingsTab: "accounts"
   property string pluginName: "Mail"
-  property string pluginVersion: "1.1.1"
+  property string pluginVersion: "1.1.2"
   property string mailtoHandlerId: ""
   property string mailtoHandlerName: ""
-  property string pluginUpdateStatus: ""
-  property string pluginUpdateError: ""
   property bool notifications: true
   property string defaultAccountId: ""
   property bool settingsOpen: false
@@ -274,25 +272,6 @@ Panel {
     var id = String(mailtoHandlerId || "").toLowerCase()
     return id.indexOf("omarchy-mail") >= 0
   }
-  readonly property string pluginUpdateLabel: {
-    if (pluginUpdateStatus === "checking") return "Checking for updates…"
-    if (pluginUpdateStatus === "updating") return "Updating…"
-    if (pluginUpdateStatus === "current") return "You're on the latest version."
-    if (pluginUpdateStatus === "available") return "A newer version is available."
-    if (pluginUpdateStatus === "ahead") return "This install is ahead of GitHub."
-    if (pluginUpdateStatus === "unsupported")
-      return pluginUpdateError || "This install can't be updated from here."
-    if (pluginUpdateStatus === "error")
-      return pluginUpdateError || "Couldn't check for updates."
-    return "Check GitHub for a newer version."
-  }
-  readonly property string pluginUpdateButtonLabel: {
-    if (pluginUpdateStatus === "checking") return "Checking…"
-    if (pluginUpdateStatus === "updating") return "Updating…"
-    if (pluginUpdateStatus === "available") return "Update"
-    return "Check for updates"
-  }
-  readonly property bool pluginUpdateBusy: pluginUpdateStatus === "checking" || pluginUpdateStatus === "updating"
 
   Process {
     id: mailtoHandlerProc
@@ -312,15 +291,6 @@ Panel {
       waitForEnd: true
     }
     onExited: root.applyMailtoHandlerJson(mailtoInstallOut.text)
-  }
-
-  Process {
-    id: pluginUpdateProc
-    stdout: StdioCollector {
-      id: pluginUpdateOut
-      waitForEnd: true
-    }
-    onExited: root.applyPluginUpdateJson(pluginUpdateOut.text)
   }
 
   Process {
@@ -1356,56 +1326,11 @@ Panel {
     if (!id || id === settingsTab) return
     settingsTab = id
     if (id === "general") refreshMailtoHandler()
-    if (id === "about") checkPluginUpdate()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
   function openSupport() {
     openLink("https://github.com/roymckenzie/omarchy-mail/issues")
-  }
-
-  function applyPluginUpdateJson(raw) {
-    var text = String(raw || "").replace(/^\s+|\s+$/g, "")
-    if (text === "") {
-      if (pluginUpdateStatus === "checking" || pluginUpdateStatus === "updating") {
-        pluginUpdateStatus = "error"
-        pluginUpdateError = "Couldn't check for updates."
-      }
-      return
-    }
-    try {
-      var data = JSON.parse(text)
-      var status = String(data && data.status ? data.status : "")
-      if (status === "current" || status === "available" || status === "unsupported"
-          || status === "error" || status === "ahead")
-        pluginUpdateStatus = status
-      else
-        pluginUpdateStatus = "error"
-      pluginUpdateError = String(data && data.error ? data.error : "")
-      if (data && data.ok === false && pluginUpdateStatus !== "available") {
-        pluginUpdateStatus = "error"
-        if (pluginUpdateError === "") pluginUpdateError = "Update failed."
-      }
-    } catch (e) {
-      pluginUpdateStatus = "error"
-      pluginUpdateError = "Couldn't check for updates."
-    }
-  }
-
-  function checkPluginUpdate() {
-    if (pluginUpdateProc.running) return
-    pluginUpdateStatus = "checking"
-    pluginUpdateError = ""
-    pluginUpdateProc.command = [Model.pluginFile(Qt.resolvedUrl("bin/omarchy-mail-helper")), "--update-status"]
-    pluginUpdateProc.running = true
-  }
-
-  function applyPluginUpdate() {
-    if (pluginUpdateProc.running || pluginUpdateStatus !== "available") return
-    pluginUpdateStatus = "updating"
-    pluginUpdateError = ""
-    pluginUpdateProc.command = [Model.pluginFile(Qt.resolvedUrl("bin/omarchy-mail-helper")), "--apply-update"]
-    pluginUpdateProc.running = true
   }
 
   function openSettings() {
@@ -1415,7 +1340,6 @@ Panel {
     if (helpPopup.opened) helpPopup.close()
     settingsOpen = true
     refreshMailtoHandler()
-    if (settingsTab === "about") checkPluginUpdate()
     if (!settingsAccountId && settingsAccounts.length > 0)
       selectSettingsAccount(settingsAccounts[0].id)
     else if (settingsAccountId)

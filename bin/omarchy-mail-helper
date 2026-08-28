@@ -5,10 +5,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from omarchy_mail import (
     main,
-    print_apply_plugin_update,
     print_install_mailto_handler,
     print_mailto_handler,
-    print_plugin_update_status,
     run_tests,
 )
 
@@ -19,8 +17,4 @@ if __name__ == "__main__":
         raise SystemExit(print_mailto_handler())
     if "--install-mailto-handler" in sys.argv:
         raise SystemExit(print_install_mailto_handler())
-    if "--update-status" in sys.argv:
-        raise SystemExit(print_plugin_update_status())
-    if "--apply-update" in sys.argv:
-        raise SystemExit(print_apply_plugin_update())
     raise SystemExit(main())

@@ -634,53 +634,6 @@ Column {
 
         Item {
           width: parent.width
-          height: Math.max(updateCopy.implicitHeight, updateBtn.height)
-
-          Column {
-            id: updateCopy
-            anchors.left: parent.left
-            anchors.right: updateBtn.left
-            anchors.rightMargin: Style.space(16)
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(4)
-
-            Text {
-              width: parent.width
-              text: "Updates"
-              color: host.contentForeground
-              font.family: host.contentFontFamily
-              font.pixelSize: Style.font.body
-              wrapMode: Text.WordWrap
-            }
-
-            Text {
-              width: parent.width
-              text: host.pluginUpdateLabel
-              color: host.dim
-              font.family: host.contentFontFamily
-              font.pixelSize: Style.font.bodySmall
-              wrapMode: Text.WordWrap
-            }
-          }
-
-          Button {
-            id: updateBtn
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            text: host.pluginUpdateButtonLabel
-            bordered: true
-            enabled: !host.pluginUpdateBusy
-            foreground: host.contentForeground
-            fontFamily: host.contentFontFamily
-            onClicked: {
-              if (host.pluginUpdateStatus === "available") host.applyPluginUpdate()
-              else host.checkPluginUpdate()
-            }
-          }
-        }
-
-        Item {
-          width: parent.width
           height: Math.max(supportCopy.implicitHeight, supportBtn.height)
 
           Column {

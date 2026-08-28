@@ -471,13 +471,6 @@ class TestOutgoing(unittest.TestCase):
             self.assertIn("omarchy-mail compose", text)
             self.assertEqual(mail.parse_desktop_name(text), "Mail")
 
-    def test_plugin_update_status_shape(self):
-        info = mail.plugin_update_status()
-        self.assertIn(info["status"], ("current", "available", "unsupported", "error", "ahead"))
-        self.assertIn("local", info)
-        self.assertIn("remote", info)
-        self.assertIn("error", info)
-
 
 if __name__ == "__main__":
     unittest.main()
