@@ -167,5 +167,31 @@ TestCase {
     compare(Model.resolvedComposeAccountId(accounts, "", "all", ""), "personal")
     compare(Model.resolvedComposeAccountId(accounts, "gone", "all", ""), "personal")
     compare(Model.resolvedComposeAccountId([], "", "all", ""), "")
+    compare(Model.resolvedComposeAccountId(accounts, "", "all", "work", "personal"), "personal")
+    compare(Model.resolvedComposeAccountId(accounts, "", "work", "personal", "personal"), "work")
+  }
+
+  function test_parsePrefs() {
+    compare(Model.parsePrefs("").notifications, true)
+    compare(Model.parsePrefs("").defaultAccountId, "")
+    var prefs = Model.parsePrefs('{"version":1,"accounts":[],"notifications":false,"defaultAccountId":"work"}')
+    compare(prefs.notifications, false)
+    compare(prefs.defaultAccountId, "work")
+    compare(Model.parsePrefs('{"accounts":[]}').notifications, true)
+  }
+
+  function test_parseMailto() {
+    var empty = Model.parseMailto("mailto:")
+    compare(empty.to, "")
+    compare(empty.subject, "")
+    var simple = Model.parseMailto("mailto:ada@example.com")
+    compare(simple.to, "ada@example.com")
+    var full = Model.parseMailto("mailto:ada@example.com?subject=Hello%20there&body=Hi%20Ada&cc=bob@site.org")
+    compare(full.to, "ada@example.com")
+    compare(full.subject, "Hello there")
+    compare(full.body, "Hi Ada")
+    compare(full.cc, "bob@site.org")
+    var extraTo = Model.parseMailto("mailto:ada@example.com?to=bob@site.org")
+    compare(extraTo.to, "ada@example.com, bob@site.org")
   }
 }

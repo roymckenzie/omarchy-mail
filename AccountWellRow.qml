@@ -20,7 +20,6 @@ CursorSurface {
       anchors.fill: parent
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
-      onEntered: host.selectSettingsAccount(account.id)
       onClicked: host.selectSettingsAccount(account.id)
     }
 

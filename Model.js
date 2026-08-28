@@ -17,12 +17,45 @@ function accountName(accounts, id) {
   return account ? account.name : id
 }
 
-function resolvedComposeAccountId(accounts, fromId, filterId, selectedId) {
+function resolvedComposeAccountId(accounts, fromId, filterId, selectedId, defaultId) {
   if (fromId && accountById(accounts, fromId)) return fromId
   if (filterId && filterId !== "all") return filterId
+  if (defaultId && accountById(accounts, defaultId)) return defaultId
   if (selectedId && selectedId !== "all") return selectedId
   if (accounts && accounts.length) return accounts[0].id
   return ""
+}
+
+function decodeMailtoPart(value) {
+  var s = String(value || "").replace(/\+/g, " ")
+  try { return decodeURIComponent(s) } catch (e) { return s }
+}
+
+function parseMailto(url) {
+  var raw = String(url || "").replace(/^\s+|\s+$/g, "")
+  if (raw.toLowerCase().indexOf("mailto:") === 0) raw = raw.slice(7)
+  var q = raw.indexOf("?")
+  var path = q < 0 ? raw : raw.slice(0, q)
+  var query = q < 0 ? "" : raw.slice(q + 1)
+  var to = []
+  var pathTo = decodeMailtoPart(path).replace(/^\s+|\s+$/g, "")
+  if (pathTo !== "") to.push(pathTo)
+  var cc = "", bcc = "", subject = "", body = ""
+  if (query !== "") {
+    var parts = query.split("&")
+    for (var i = 0; i < parts.length; i++) {
+      var bit = parts[i]
+      var eq = bit.indexOf("=")
+      var key = decodeMailtoPart(eq < 0 ? bit : bit.slice(0, eq)).toLowerCase()
+      var val = decodeMailtoPart(eq < 0 ? "" : bit.slice(eq + 1))
+      if (key === "to" && val) to.push(val)
+      else if (key === "cc") cc = cc ? cc + ", " + val : val
+      else if (key === "bcc") bcc = bcc ? bcc + ", " + val : val
+      else if (key === "subject") subject = val
+      else if (key === "body") body = val
+    }
+  }
+  return { to: to.join(", "), cc: cc, bcc: bcc, subject: subject, body: body }
 }
 
 function mailboxOf(conversation) {
@@ -878,10 +911,44 @@ function accountForDisk(account) {
   return out
 }
 
-function serializeAccounts(list) {
+function defaultPrefs() {
+  return { notifications: true, defaultAccountId: "" }
+}
+
+function normalizePrefs(prefs) {
+  var out = defaultPrefs()
+  if (!prefs) return out
+  if (prefs.notifications === false) out.notifications = false
+  out.defaultAccountId = String(prefs.defaultAccountId || "")
+  return out
+}
+
+function parsePrefs(raw) {
+  var text = String(raw || "").replace(/^\s+|\s+$/g, "")
+  if (text === "") return defaultPrefs()
+  try {
+    var data = JSON.parse(text)
+  } catch (e) {
+    return defaultPrefs()
+  }
+  if (!data || Array.isArray(data)) return defaultPrefs()
+  return normalizePrefs(data)
+}
+
+function serializeConfig(list, prefs) {
   var accounts = []
   for (var i = 0; i < (list || []).length; i++) accounts.push(accountForDisk(list[i]))
-  return JSON.stringify({ version: 1, accounts: accounts }, null, 2) + "\n"
+  var p = normalizePrefs(prefs)
+  return JSON.stringify({
+    version: 1,
+    accounts: accounts,
+    notifications: p.notifications,
+    defaultAccountId: p.defaultAccountId
+  }, null, 2) + "\n"
+}
+
+function serializeAccounts(list) {
+  return serializeConfig(list, null)
 }
 
 function escapeHtml(value) {

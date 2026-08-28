@@ -2264,6 +2264,255 @@ def write_json(lock: threading.Lock, value: dict[str, Any]) -> None:
         sys.stdout.flush()
 
 
+def parse_desktop_name(text: str) -> str:
+    in_entry = False
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if line == "[Desktop Entry]":
+            in_entry = True
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            in_entry = False
+            continue
+        if in_entry and line.startswith("Name=") and not line.startswith("Name["):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
+def pretty_desktop_id(desktop_id: str) -> str:
+    stem = str(desktop_id or "").strip()
+    if stem.endswith(".desktop"):
+        stem = stem[: -len(".desktop")]
+    if not stem:
+        return ""
+    lower = stem.lower()
+    if lower.endswith("omarchy-mail") or lower == "omarchy-mail":
+        return "Mail"
+    if "." in stem:
+        stem = stem.rsplit(".", 1)[-1]
+    return stem.replace("-", " ").replace("_", " ")
+
+
+def desktop_entry_name(desktop_id: str) -> str:
+    name = str(desktop_id or "").strip()
+    if not name:
+        return ""
+    if not name.endswith(".desktop"):
+        name += ".desktop"
+    home = Path.home()
+    data_home = Path(os.environ.get("XDG_DATA_HOME") or (home / ".local/share"))
+    dirs = [data_home, home / ".local/share", Path("/usr/share/omarchy")]
+    for raw in str(os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":"):
+        if raw.strip():
+            dirs.append(Path(raw.strip()))
+    seen: set[str] = set()
+    for folder in dirs:
+        path = folder / "applications" / name
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            label = parse_desktop_name(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+        if label:
+            return label
+    return ""
+
+
+def current_mailto_handler() -> dict[str, str]:
+    desktop_id = ""
+    try:
+        proc = subprocess.run(
+            ["xdg-mime", "query", "default", "x-scheme-handler/mailto"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        desktop_id = str(proc.stdout or "").strip()
+    except (OSError, subprocess.SubprocessError):
+        desktop_id = ""
+    name = desktop_entry_name(desktop_id) if desktop_id else ""
+    if not name:
+        name = pretty_desktop_id(desktop_id)
+    return {"id": desktop_id, "name": name}
+
+
+def print_mailto_handler() -> int:
+    sys.stdout.write(json.dumps(current_mailto_handler(), ensure_ascii=False) + "\n")
+    return 0
+
+
+MAILTO_DESKTOP_ID = "omarchy-mail.desktop"
+
+
+def mailto_desktop_source() -> Path:
+    return Path(__file__).resolve().parent.parent / "applications" / MAILTO_DESKTOP_ID
+
+
+def applications_dir() -> Path:
+    data_home = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local/share"))
+    return data_home / "applications"
+
+
+def install_mailto_desktop(dest_dir: Path | None = None) -> Path:
+    dest_dir = dest_dir or applications_dir()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / MAILTO_DESKTOP_ID
+    dest.write_text(mailto_desktop_source().read_text(encoding="utf-8"), encoding="utf-8")
+    return dest
+
+
+def install_mailto_handler() -> dict[str, str]:
+    dest = install_mailto_desktop()
+    try:
+        subprocess.run(
+            ["xdg-mime", "default", dest.name, "x-scheme-handler/mailto"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        subprocess.run(
+            ["update-desktop-database", str(dest.parent)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return current_mailto_handler()
+
+
+def print_install_mailto_handler() -> int:
+    sys.stdout.write(json.dumps(install_mailto_handler(), ensure_ascii=False) + "\n")
+    return 0
+
+
+PLUGIN_ID = "io.github.roymckenzie.omarchy-mail"
+
+
+def plugin_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def _git(repo: Path, args: list[str], timeout: int = 12) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_ASKPASS"] = "/bin/false"
+    env["GIT_SSH_COMMAND"] = "ssh -oBatchMode=yes -oConnectTimeout=10"
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+        env=env,
+    )
+
+
+def plugin_id() -> str:
+    try:
+        data = json.loads((plugin_root() / "manifest.json").read_text(encoding="utf-8"))
+        ident = str(data.get("id") or "").strip()
+        if ident:
+            return ident
+    except (OSError, ValueError):
+        pass
+    return PLUGIN_ID
+
+
+def plugin_update_status() -> dict[str, Any]:
+    root = plugin_root()
+    out: dict[str, Any] = {"status": "error", "local": "", "remote": "", "error": "", "ok": True}
+    try:
+        inside = _git(root, ["rev-parse", "--is-inside-work-tree"], timeout=3)
+    except (OSError, subprocess.SubprocessError):
+        out["error"] = "Couldn't read git status."
+        return out
+    if inside.returncode != 0 or str(inside.stdout).strip() != "true":
+        out["status"] = "unsupported"
+        out["error"] = "This install isn't git-managed."
+        return out
+    local = str(_git(root, ["rev-parse", "HEAD"], timeout=3).stdout).strip()
+    out["local"] = local
+    origin = str(_git(root, ["remote", "get-url", "origin"], timeout=3).stdout).strip()
+    if not origin:
+        out["status"] = "unsupported"
+        out["error"] = "No git origin is configured."
+        return out
+    try:
+        remote_run = _git(root, ["ls-remote", "--exit-code", origin, "HEAD"], timeout=12)
+    except (OSError, subprocess.SubprocessError):
+        out["error"] = "Couldn't reach GitHub."
+        return out
+    remote = ""
+    for line in str(remote_run.stdout or "").splitlines():
+        bits = line.split()
+        if bits:
+            remote = bits[0]
+            break
+    out["remote"] = remote
+    if not remote:
+        out["error"] = "Couldn't reach GitHub."
+        return out
+    if local == remote:
+        out["status"] = "current"
+        return out
+    has = _git(root, ["cat-file", "-e", f"{remote}^{{commit}}"], timeout=3)
+    if has.returncode == 0:
+        ancestor = _git(root, ["merge-base", "--is-ancestor", remote, local], timeout=3)
+        if ancestor.returncode == 0:
+            out["status"] = "ahead"
+            out["error"] = "This install is ahead of GitHub."
+            return out
+    out["status"] = "available"
+    return out
+
+
+def apply_plugin_update() -> dict[str, Any]:
+    try:
+        proc = subprocess.run(
+            ["omarchy", "plugin", "update", plugin_id(), "--yes"],
+            capture_output=True,
+            text=True,
+            timeout=90,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        info = plugin_update_status()
+        info["ok"] = False
+        info["error"] = str(exc)
+        return info
+    if proc.returncode != 0:
+        lines = str(proc.stderr or proc.stdout or "Update failed.").strip().splitlines()
+        info = plugin_update_status()
+        info["ok"] = False
+        info["error"] = lines[-1] if lines else "Update failed."
+        return info
+    info = plugin_update_status()
+    info["ok"] = True
+    info["error"] = ""
+    return info
+
+
+def print_plugin_update_status() -> int:
+    sys.stdout.write(json.dumps(plugin_update_status(), ensure_ascii=False) + "\n")
+    return 0
+
+
+def print_apply_plugin_update() -> int:
+    info = apply_plugin_update()
+    sys.stdout.write(json.dumps(info, ensure_ascii=False) + "\n")
+    return 0 if info.get("ok") is not False else 1
+
+
 def main() -> None:
     path = config_path()
     try:
@@ -2321,4 +2570,12 @@ def run_tests() -> int:
 if __name__ == "__main__":
     if "--test" in sys.argv:
         raise SystemExit(run_tests())
+    if "--mailto-handler" in sys.argv:
+        raise SystemExit(print_mailto_handler())
+    if "--install-mailto-handler" in sys.argv:
+        raise SystemExit(print_install_mailto_handler())
+    if "--update-status" in sys.argv:
+        raise SystemExit(print_plugin_update_status())
+    if "--apply-update" in sys.argv:
+        raise SystemExit(print_apply_plugin_update())
     main()

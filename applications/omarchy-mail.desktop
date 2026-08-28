@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Mail
+Comment=Compose with Omarchy Mail
+Exec=omarchy-shell io.github.roymckenzie.omarchy-mail compose %u
+Terminal=false
+StartupNotify=false
+NoDisplay=true
+Icon=mail-unread
+MimeType=x-scheme-handler/mailto;
+Categories=Network;Email;Office;

@@ -35,6 +35,15 @@ Panel {
   property var expandedIds: ({})
   property string expandedSeedId: ""
   property string settingsAccountId: ""
+  property string settingsTab: "accounts"
+  property string pluginName: "Mail"
+  property string pluginVersion: "1.0.2"
+  property string mailtoHandlerId: ""
+  property string mailtoHandlerName: ""
+  property string pluginUpdateStatus: ""
+  property string pluginUpdateError: ""
+  property bool notifications: true
+  property string defaultAccountId: ""
   property bool settingsOpen: false
   property bool settingsHydrating: false
   property bool composing: false
@@ -170,8 +179,21 @@ Panel {
     ? Model.filterContacts(composeContactList, Model.addressDraft(composeAddrDraft), 8)
     : []
   readonly property bool composeFromCanPick: accounts.length > 1
+  readonly property string settingsDefaultAccountId: {
+    if (defaultAccountId && Model.accountById(accounts, defaultAccountId)) return defaultAccountId
+    return accounts.length ? accounts[0].id : ""
+  }
+  readonly property var defaultAccountOptions: {
+    var out = []
+    for (var i = 0; i < accounts.length; i++) {
+      var acc = accounts[i]
+      if (!acc) continue
+      out.push({ value: acc.id, label: acc.name || acc.email || acc.id })
+    }
+    return out
+  }
   readonly property string composeAccountId: Model.resolvedComposeAccountId(
-    accounts, composeFromId, accountId, selected && selected.accountId)
+    accounts, composeFromId, accountId, selected && selected.accountId, defaultAccountId)
   readonly property string composeFromLabel: {
     var acc = Model.accountById(accounts, composeAccountId)
     return acc ? Model.formatAddress(Model.accountFromName(acc), acc.email) : ""
@@ -205,10 +227,23 @@ Panel {
     onReady: root.applyStoredAccounts()
   }
 
+  FileView {
+    path: Model.pluginFile(Qt.resolvedUrl("manifest.json"))
+    printErrors: false
+    onLoaded: {
+      try {
+        var data = JSON.parse(text() || "{}")
+        if (data && data.name) root.pluginName = String(data.name)
+        if (data && data.version) root.pluginVersion = String(data.version)
+      } catch (e) {}
+    }
+  }
+
   ImapService {
     id: mail
     accountId: root.accountId
     mailbox: root.mailboxId
+    notifications: root.notifications
     watchList: root.opened && !root.settingsOpen
   }
 
@@ -234,6 +269,59 @@ Panel {
   readonly property var smtpPortField: settingsPane.smtpPortField
   readonly property var accUserField: settingsPane.accUserField
   readonly property var accPassField: settingsPane.accPassField
+  readonly property var defaultFromDropdown: settingsPane.defaultFromDropdown
+  readonly property bool mailIsMailtoHandler: {
+    var id = String(mailtoHandlerId || "").toLowerCase()
+    return id.indexOf("omarchy-mail") >= 0
+  }
+  readonly property string pluginUpdateLabel: {
+    if (pluginUpdateStatus === "checking") return "Checking for updates…"
+    if (pluginUpdateStatus === "updating") return "Updating…"
+    if (pluginUpdateStatus === "current") return "You're on the latest version."
+    if (pluginUpdateStatus === "available") return "A newer version is available."
+    if (pluginUpdateStatus === "ahead") return "This install is ahead of GitHub."
+    if (pluginUpdateStatus === "unsupported")
+      return pluginUpdateError || "This install can't be updated from here."
+    if (pluginUpdateStatus === "error")
+      return pluginUpdateError || "Couldn't check for updates."
+    return "Check GitHub for a newer version."
+  }
+  readonly property string pluginUpdateButtonLabel: {
+    if (pluginUpdateStatus === "checking") return "Checking…"
+    if (pluginUpdateStatus === "updating") return "Updating…"
+    if (pluginUpdateStatus === "available") return "Update"
+    return "Check for updates"
+  }
+  readonly property bool pluginUpdateBusy: pluginUpdateStatus === "checking" || pluginUpdateStatus === "updating"
+
+  Process {
+    id: mailtoHandlerProc
+    command: [Model.pluginFile(Qt.resolvedUrl("bin/omarchy-mail-helper")), "--mailto-handler"]
+    stdout: StdioCollector {
+      id: mailtoHandlerOut
+      waitForEnd: true
+    }
+    onExited: root.applyMailtoHandlerJson(mailtoHandlerOut.text)
+  }
+
+  Process {
+    id: mailtoInstallProc
+    command: [Model.pluginFile(Qt.resolvedUrl("bin/omarchy-mail-helper")), "--install-mailto-handler"]
+    stdout: StdioCollector {
+      id: mailtoInstallOut
+      waitForEnd: true
+    }
+    onExited: root.applyMailtoHandlerJson(mailtoInstallOut.text)
+  }
+
+  Process {
+    id: pluginUpdateProc
+    stdout: StdioCollector {
+      id: pluginUpdateOut
+      waitForEnd: true
+    }
+    onExited: root.applyPluginUpdateJson(pluginUpdateOut.text)
+  }
 
   Process {
     id: filePicker
@@ -294,16 +382,45 @@ Panel {
   function applyStoredAccounts() {
     if (store.foundFile) {
       applyAccountList(store.accountsWithSecrets())
+      applyPrefs(store.prefs)
       inbox = []
       mail.start()
     } else {
       applyAccountList([])
+      applyPrefs(store.prefs)
     }
   }
 
+  function prefsObject() {
+    return { notifications: notifications, defaultAccountId: defaultAccountId }
+  }
+
+  function applyPrefs(prefs) {
+    var next = Model.normalizePrefs(prefs)
+    notifications = next.notifications !== false
+    defaultAccountId = Model.accountById(accounts, next.defaultAccountId)
+      ? next.defaultAccountId
+      : ""
+  }
+
   function persistAccounts() {
-    store.persist(accounts)
+    store.persist(accounts, prefsObject())
     if (accounts.length) mail.restart()
+  }
+
+  function persistPrefs() {
+    store.persistPrefs(prefsObject())
+  }
+
+  function setNotifications(on) {
+    notifications = on === true
+    persistPrefs()
+  }
+
+  function setDefaultAccount(id) {
+    if (id && !Model.accountById(accounts, id)) return
+    defaultAccountId = id || ""
+    persistPrefs()
   }
 
   function openLink(url) {
@@ -627,7 +744,7 @@ Panel {
   }
 
   function defaultComposeAccountId() {
-    return Model.resolvedComposeAccountId(accounts, "", accountId, selected && selected.accountId)
+    return Model.resolvedComposeAccountId(accounts, "", accountId, selected && selected.accountId, defaultAccountId)
   }
 
   function setComposeFrom(id) {
@@ -1170,12 +1287,135 @@ Panel {
     mail.sendMail(extra)
   }
 
+  function applyMailtoHandlerJson(raw) {
+    var text = String(raw || "").replace(/^\s+|\s+$/g, "")
+    if (text === "") return
+    try {
+      var data = JSON.parse(text)
+      mailtoHandlerId = String(data && data.id ? data.id : "")
+      mailtoHandlerName = String(data && data.name ? data.name : "")
+    } catch (e) {}
+  }
+
+  function refreshMailtoHandler() {
+    if (mailtoHandlerProc.running) return
+    mailtoHandlerProc.running = true
+  }
+
+  function setDefaultMailHandler() {
+    if (mailIsMailtoHandler || mailtoInstallProc.running) return
+    mailtoInstallProc.running = true
+  }
+
+  function applyComposeFields(to, cc, bcc, subject, body) {
+    composeHydrating = true
+    composeTo = to || ""
+    composeCc = cc || ""
+    composeBcc = bcc || ""
+    composeShowCc = composeCc !== ""
+    composeShowBcc = composeBcc !== ""
+    composeSubject = subject || ""
+    composeBody = body || ""
+    if (composeToField) composeToField.text = composeTo
+    if (composeCcField) composeCcField.text = composeCc
+    if (composeBccField) composeBccField.text = composeBcc
+    if (composeSubjectField) composeSubjectField.text = composeSubject
+    if (composeBodyField) composeBodyField.text = composeBody
+    composeHydrating = false
+  }
+
+  function openMailto(url) {
+    if (settingsOpen) closeSettings()
+    if (!liveMail) {
+      open()
+      openSettings()
+      return
+    }
+    var mailTo = Model.parseMailto(url)
+    composing = true
+    forwarding = false
+    pendingForward = false
+    replyOpen = false
+    composeHold = false
+    suppressSelection = false
+    composeFromId = defaultComposeAccountId()
+    composeSuggestIndex = 0
+    composeDirty = true
+    composeLoadedId = ""
+    applyComposeFields(mailTo.to, mailTo.cc, mailTo.bcc, mailTo.subject, mailTo.body)
+    clearOutgoingFiles()
+    mail.sendError = ""
+    if (!opened) open()
+    Qt.callLater(function() {
+      if (composeTo !== "" && composeSubjectField) composeSubjectField.forceActiveFocus()
+      else if (composeToField) composeToField.forceActiveFocus()
+    })
+  }
+
+  function setSettingsTab(id) {
+    if (!id || id === settingsTab) return
+    settingsTab = id
+    if (id === "general") refreshMailtoHandler()
+    if (id === "about") checkPluginUpdate()
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  function openSupport() {
+    openLink("https://github.com/roymckenzie/omarchy-mail/issues")
+  }
+
+  function applyPluginUpdateJson(raw) {
+    var text = String(raw || "").replace(/^\s+|\s+$/g, "")
+    if (text === "") {
+      if (pluginUpdateStatus === "checking" || pluginUpdateStatus === "updating") {
+        pluginUpdateStatus = "error"
+        pluginUpdateError = "Couldn't check for updates."
+      }
+      return
+    }
+    try {
+      var data = JSON.parse(text)
+      var status = String(data && data.status ? data.status : "")
+      if (status === "current" || status === "available" || status === "unsupported"
+          || status === "error" || status === "ahead")
+        pluginUpdateStatus = status
+      else
+        pluginUpdateStatus = "error"
+      pluginUpdateError = String(data && data.error ? data.error : "")
+      if (data && data.ok === false && pluginUpdateStatus !== "available") {
+        pluginUpdateStatus = "error"
+        if (pluginUpdateError === "") pluginUpdateError = "Update failed."
+      }
+    } catch (e) {
+      pluginUpdateStatus = "error"
+      pluginUpdateError = "Couldn't check for updates."
+    }
+  }
+
+  function checkPluginUpdate() {
+    if (pluginUpdateProc.running) return
+    pluginUpdateStatus = "checking"
+    pluginUpdateError = ""
+    pluginUpdateProc.command = [Model.pluginFile(Qt.resolvedUrl("bin/omarchy-mail-helper")), "--update-status"]
+    pluginUpdateProc.running = true
+  }
+
+  function applyPluginUpdate() {
+    if (pluginUpdateProc.running || pluginUpdateStatus !== "available") return
+    pluginUpdateStatus = "updating"
+    pluginUpdateError = ""
+    pluginUpdateProc.command = [Model.pluginFile(Qt.resolvedUrl("bin/omarchy-mail-helper")), "--apply-update"]
+    pluginUpdateProc.running = true
+  }
+
   function openSettings() {
     composing = false
     replyOpen = false
     gotoPending = false
     if (helpPopup.opened) helpPopup.close()
     settingsOpen = true
+    refreshMailtoHandler()
+    if (settingsTab === "about") checkPluginUpdate()
     if (!settingsAccountId && settingsAccounts.length > 0)
       selectSettingsAccount(settingsAccounts[0].id)
     else if (settingsAccountId)
@@ -1251,6 +1491,7 @@ Panel {
     delete drafts[id]
     accountDrafts = drafts
     if (accountId === id) accountId = "all"
+    if (defaultAccountId === id) defaultAccountId = ""
     persistAccounts()
     if (settingsAccounts.length > 0) selectSettingsAccount(settingsAccounts[0].id)
     else {
@@ -1379,6 +1620,7 @@ Panel {
     var lower = key.toLowerCase()
 
     if (settingsOpen) {
+      if (settingsTab !== "accounts") return
       if (lower === "a") addAccount()
       else if (lower === "s") saveAccount()
       return
@@ -1536,6 +1778,7 @@ Panel {
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
     function reset(): void { root.resetInbox() }
+    function compose(mailto: string): void { root.openMailto(mailto) }
   }
 
   function handleBarPress(b) {
@@ -1599,17 +1842,19 @@ Panel {
           || composeBodyField.editorFocused))
         || mailboxPicker.popupOpen || root.settingsFieldFocused
         || listSearchField.activeFocus || helpPopup.opened || composeSuggestPopup.opened
-        || composeFromPopup.opened
+        || composeFromPopup.opened || (defaultFromDropdown && defaultFromDropdown.popupOpen)
       onMoveRequested: function(dx, dy) {
         if (root.settingsOpen) {
-          if (dy !== 0) root.selectSettingsAt(root.settingsIndex + dy)
+          if (root.settingsTab === "accounts" && dy !== 0)
+            root.selectSettingsAt(root.settingsIndex + dy)
           return
         }
         root.moveCursor(dx, dy)
       }
       onActivateRequested: {
-        if (root.settingsOpen) root.saveAccount()
-        else root.focusPane("read")
+        if (root.settingsOpen) {
+          if (root.settingsTab === "accounts") root.saveAccount()
+        } else root.focusPane("read")
       }
       onDeleteRequested: {
         if (!root.settingsOpen) root.trashSelected()

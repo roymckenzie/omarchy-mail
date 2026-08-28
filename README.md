@@ -43,7 +43,8 @@ file.
 omarchy bar move io.github.roymckenzie.omarchy-mail --section right
 ```
 
-A Hyprland bind of Super+M can toggle the panel (not installed by the plugin):
+General settings can make Mail the default `mailto:` handler. A Hyprland bind
+of Super+M can toggle the panel (not installed by the plugin):
 
 ```lua
 o.bind("SUPER + M", "Mail", "omarchy-shell shell toggle io.github.roymckenzie.omarchy-mail")
@@ -76,7 +77,8 @@ closes for the dialog, then restores the draft). Compose sends over SMTP and
 appends a copy to Sent. Save Draft appends to the account Drafts folder.
 With more than one account, click From in compose to pick which address
 sends the message; Send and Save Draft use that account's SMTP, Sent, and
-Drafts. Opening a draft uses the compose pane; Sent is a reading pane.
+Drafts. General settings can mute new-mail notifications and choose the
+default From account when All is selected. Opening a draft uses the compose pane; Sent is a reading pane.
 
 The To/Cc/Bcc fields autocomplete from addresses harvested from IMAP envelopes
 (From on inbox, To/Cc on sent). HTML mail is rendered as a small block model

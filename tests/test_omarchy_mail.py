@@ -1,4 +1,5 @@
 import sys
+import tempfile
 import unittest
 from email.message import EmailMessage
 from pathlib import Path
@@ -450,6 +451,32 @@ class TestOutgoing(unittest.TestCase):
         self.assertEqual(mail.draft_replace_account_id({"replaceAccount": "b"}, "a"), "b")
         self.assertEqual(mail.draft_replace_account_id({}, "a"), "a")
         self.assertEqual(mail.draft_replace_account_id({"replaceAccount": "all"}, "a"), "a")
+
+    def test_parse_desktop_name(self):
+        text = "[Desktop Entry]\nName=HEY\nName[es]=HEY\nExec=hey\n"
+        self.assertEqual(mail.parse_desktop_name(text), "HEY")
+        self.assertEqual(mail.parse_desktop_name("[Other]\nName=Nope\n"), "")
+
+    def test_pretty_desktop_id(self):
+        self.assertEqual(mail.pretty_desktop_id("HEY.desktop"), "HEY")
+        self.assertEqual(mail.pretty_desktop_id("io.github.roymckenzie.omarchy-mail.desktop"), "Mail")
+        self.assertEqual(mail.pretty_desktop_id("org.gnome.Evolution.desktop"), "Evolution")
+
+    def test_install_mailto_desktop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = mail.install_mailto_desktop(Path(tmp))
+            self.assertTrue(dest.is_file())
+            text = dest.read_text(encoding="utf-8")
+            self.assertIn("x-scheme-handler/mailto", text)
+            self.assertIn("omarchy-mail compose", text)
+            self.assertEqual(mail.parse_desktop_name(text), "Mail")
+
+    def test_plugin_update_status_shape(self):
+        info = mail.plugin_update_status()
+        self.assertIn(info["status"], ("current", "available", "unsupported", "error", "ahead"))
+        self.assertIn("local", info)
+        self.assertIn("remote", info)
+        self.assertIn("error", info)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ Item {
   property string fetchingId: ""
   property bool available: false
   property bool live: false
+  property bool notifications: true
   property bool sending: false
   property bool saving: false
   property string sendError: ""
@@ -278,7 +279,7 @@ Item {
       _booted = true
       return
     }
-    if (fresh.length) notifyNewMail(fresh)
+    if (fresh.length && notifications) notifyNewMail(fresh)
   }
 
   function notifyNewMail(convs) {

@@ -8,6 +8,9 @@ Item {
   id: pane
   property var host
   visible: host && host.settingsOpen
+  readonly property bool accountsTab: host && host.settingsTab === "accounts"
+  readonly property bool generalTab: host && host.settingsTab === "general"
+  readonly property bool aboutTab: host && host.settingsTab === "about"
   readonly property var accNameField: accNameFieldImpl
   readonly property var accFromNameField: accFromNameFieldImpl
   readonly property var accEmailField: accEmailFieldImpl
@@ -17,12 +20,80 @@ Item {
   readonly property var smtpPortField: smtpPortFieldImpl
   readonly property var accUserField: accUserFieldImpl
   readonly property var accPassField: accPassFieldImpl
+  readonly property var defaultFromDropdown: defaultFromDropdownImpl
 
-Row {
-  id: settingsPanes
+Column {
   visible: host.settingsOpen
   anchors.fill: parent
-  spacing: 0
+  spacing: Style.space(10)
+
+  Item {
+    width: parent.width
+    height: Math.max(settingsTitle.implicitHeight, doneBtn.height)
+
+    Text {
+      id: settingsTitle
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      text: "SETTINGS"
+      color: host.dim
+      font.family: host.contentFontFamily
+      font.pixelSize: Style.font.bodySmall
+      font.letterSpacing: 1
+    }
+
+    Button {
+      id: doneBtn
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      text: "Done"
+      foreground: host.contentForeground
+      onClicked: host.closeSettings()
+    }
+  }
+
+  Row {
+    width: parent.width
+    height: host.filterChipHeight
+    spacing: Style.spacing.md
+
+    FilterChip {
+      host: pane.host
+      value: "accounts"
+      chipLabel: "Accounts"
+      hint: ""
+      selected: pane.accountsTab
+      onPicked: host.setSettingsTab(value)
+    }
+
+    FilterChip {
+      host: pane.host
+      value: "general"
+      chipLabel: "General"
+      hint: ""
+      selected: pane.generalTab
+      onPicked: host.setSettingsTab(value)
+    }
+
+    FilterChip {
+      host: pane.host
+      value: "about"
+      chipLabel: "About"
+      hint: ""
+      selected: pane.aboutTab
+      onPicked: host.setSettingsTab(value)
+    }
+  }
+
+  Item {
+    width: parent.width
+    height: parent.height - y
+
+    Row {
+      id: settingsPanes
+      visible: pane.accountsTab
+      anchors.fill: parent
+      spacing: 0
 
   Item {
     id: settingsListPane
@@ -33,42 +104,6 @@ Row {
       anchors.fill: parent
       anchors.rightMargin: Style.space(12)
       spacing: Style.space(10)
-
-      Item {
-        width: parent.width
-        height: Math.max(settingsTitle.implicitHeight, doneBtn.height)
-
-        Column {
-          id: settingsTitle
-          anchors.left: parent.left
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: Style.space(2)
-
-          Text {
-            text: "SETTINGS"
-            color: host.dim
-            font.family: host.contentFontFamily
-            font.pixelSize: Style.font.bodySmall
-            font.letterSpacing: 1
-          }
-
-          Text {
-            text: "Accounts"
-            color: host.contentForeground
-            font.family: host.contentFontFamily
-            font.pixelSize: Style.font.title
-          }
-        }
-
-        Button {
-          id: doneBtn
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          text: "Done"
-          foreground: host.contentForeground
-          onClicked: host.closeSettings()
-        }
-      }
 
       BorderSurface {
         width: parent.width
@@ -379,6 +414,314 @@ Row {
       color: host.dim
       font.family: host.contentFontFamily
       font.pixelSize: Style.font.body
+    }
+  }
+    }
+
+    Item {
+      visible: pane.generalTab
+      anchors.fill: parent
+
+      Column {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.topMargin: Style.space(8)
+        spacing: Style.space(20)
+
+        Item {
+          width: parent.width
+          height: Math.max(handlerCopy.implicitHeight, defaultMailBtn.height)
+
+          Column {
+            id: handlerCopy
+            anchors.left: parent.left
+            anchors.right: defaultMailBtn.left
+            anchors.rightMargin: Style.space(16)
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(4)
+
+            Text {
+              width: parent.width
+              text: String(host.mailtoHandlerName || "") !== ""
+                ? "Default mail handler: " + host.mailtoHandlerName
+                : "Default mail handler"
+              color: host.contentForeground
+              font.family: host.contentFontFamily
+              font.pixelSize: Style.font.body
+              wrapMode: Text.WordWrap
+              elide: Text.ElideRight
+            }
+
+            Text {
+              width: parent.width
+              text: "Open compose in this panel when you click a mailto: link."
+              color: host.dim
+              font.family: host.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+          }
+
+          Button {
+            id: defaultMailBtn
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: host.mailIsMailtoHandler ? "Mail is the default" : "Set Mail as default"
+            bordered: true
+            enabled: !host.mailIsMailtoHandler
+            foreground: host.contentForeground
+            fontFamily: host.contentFontFamily
+            onClicked: host.setDefaultMailHandler()
+          }
+        }
+
+        Item {
+          width: parent.width
+          height: Math.max(notifyCopy.implicitHeight, notifySwitch.height)
+
+          Column {
+            id: notifyCopy
+            anchors.left: parent.left
+            anchors.right: notifySwitch.left
+            anchors.rightMargin: Style.space(16)
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(4)
+
+            Text {
+              width: parent.width
+              text: "Notifications"
+              color: host.contentForeground
+              font.family: host.contentFontFamily
+              font.pixelSize: Style.font.body
+              wrapMode: Text.WordWrap
+            }
+
+            Text {
+              width: parent.width
+              text: "Notify when new mail arrives."
+              color: host.dim
+              font.family: host.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+          }
+
+          ToggleSwitch {
+            id: notifySwitch
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            checked: host.notifications
+            interactive: false
+            cursorRing: false
+            foreground: host.contentForeground
+          }
+
+          MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: host.setNotifications(!host.notifications)
+          }
+        }
+
+        Item {
+          visible: host.accounts.length > 1
+          width: parent.width
+          height: visible ? Math.max(fromCopy.implicitHeight, defaultFromDropdownImpl.height) : 0
+
+          Column {
+            id: fromCopy
+            anchors.left: parent.left
+            anchors.right: defaultFromDropdownImpl.left
+            anchors.rightMargin: Style.space(16)
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(4)
+
+            Text {
+              width: parent.width
+              text: "Default send-from account"
+              color: host.contentForeground
+              font.family: host.contentFontFamily
+              font.pixelSize: Style.font.body
+              wrapMode: Text.WordWrap
+            }
+
+            Text {
+              width: parent.width
+              text: "Used for new messages when All accounts are showing."
+              color: host.dim
+              font.family: host.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+          }
+
+          Dropdown {
+            id: defaultFromDropdownImpl
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            width: Style.space(220)
+            showLabel: false
+            foreground: host.contentForeground
+            fontFamily: host.contentFontFamily
+            value: host.settingsDefaultAccountId
+            options: host.defaultAccountOptions
+            onChanged: host.setDefaultAccount(value)
+          }
+        }
+      }
+    }
+
+    Item {
+      visible: pane.aboutTab
+      anchors.fill: parent
+
+      Column {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.topMargin: Style.space(8)
+        spacing: Style.space(20)
+
+        Item {
+          width: parent.width
+          height: aboutNameLabel.implicitHeight
+
+          Text {
+            id: aboutNameLabel
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Name"
+            color: host.contentForeground
+            font.family: host.contentFontFamily
+            font.pixelSize: Style.font.body
+          }
+
+          Text {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: host.pluginName
+            color: host.dim
+            font.family: host.contentFontFamily
+            font.pixelSize: Style.font.body
+          }
+        }
+
+        Item {
+          width: parent.width
+          height: aboutVersionLabel.implicitHeight
+
+          Text {
+            id: aboutVersionLabel
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Version"
+            color: host.contentForeground
+            font.family: host.contentFontFamily
+            font.pixelSize: Style.font.body
+          }
+
+          Text {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: host.pluginVersion || "—"
+            color: host.dim
+            font.family: host.contentFontFamily
+            font.pixelSize: Style.font.body
+          }
+        }
+
+        Item {
+          width: parent.width
+          height: Math.max(updateCopy.implicitHeight, updateBtn.height)
+
+          Column {
+            id: updateCopy
+            anchors.left: parent.left
+            anchors.right: updateBtn.left
+            anchors.rightMargin: Style.space(16)
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(4)
+
+            Text {
+              width: parent.width
+              text: "Updates"
+              color: host.contentForeground
+              font.family: host.contentFontFamily
+              font.pixelSize: Style.font.body
+              wrapMode: Text.WordWrap
+            }
+
+            Text {
+              width: parent.width
+              text: host.pluginUpdateLabel
+              color: host.dim
+              font.family: host.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+          }
+
+          Button {
+            id: updateBtn
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: host.pluginUpdateButtonLabel
+            bordered: true
+            enabled: !host.pluginUpdateBusy
+            foreground: host.contentForeground
+            fontFamily: host.contentFontFamily
+            onClicked: {
+              if (host.pluginUpdateStatus === "available") host.applyPluginUpdate()
+              else host.checkPluginUpdate()
+            }
+          }
+        }
+
+        Item {
+          width: parent.width
+          height: Math.max(supportCopy.implicitHeight, supportBtn.height)
+
+          Column {
+            id: supportCopy
+            anchors.left: parent.left
+            anchors.right: supportBtn.left
+            anchors.rightMargin: Style.space(16)
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(4)
+
+            Text {
+              width: parent.width
+              text: "Support"
+              color: host.contentForeground
+              font.family: host.contentFontFamily
+              font.pixelSize: Style.font.body
+              wrapMode: Text.WordWrap
+            }
+
+            Text {
+              width: parent.width
+              text: "Report bugs and ask questions on GitHub."
+              color: host.dim
+              font.family: host.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+          }
+
+          Button {
+            id: supportBtn
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Open issues"
+            bordered: true
+            foreground: host.contentForeground
+            fontFamily: host.contentFontFamily
+            onClicked: host.openSupport()
+          }
+        }
+      }
     }
   }
 }

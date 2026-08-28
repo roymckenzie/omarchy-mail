@@ -11,6 +11,7 @@ Item {
   readonly property string configPath: stateDir + "/omarchy-mail.json"
 
   property var accounts: []
+  property var prefs: Model.defaultPrefs()
   property var secrets: ({})
   property bool loaded: false
   property bool foundFile: false
@@ -30,7 +31,8 @@ Item {
     return out
   }
 
-  function persist(list) {
+  function persist(list, nextPrefs) {
+    if (nextPrefs) prefs = Model.normalizePrefs(nextPrefs)
     var previous = {}
     for (var i = 0; i < accounts.length; i++) previous[accounts[i].id] = true
 
@@ -58,11 +60,20 @@ Item {
 
     accounts = next
     secrets = nextSecrets
+    writeConfig()
+    pump()
+  }
+
+  function persistPrefs(nextPrefs) {
+    prefs = Model.normalizePrefs(nextPrefs)
+    writeConfig()
+  }
+
+  function writeConfig() {
     _writing = true
     ensureDirProc.running = true
-    configFile.setText(Model.serializeAccounts(next))
+    configFile.setText(Model.serializeConfig(accounts, prefs))
     chmodProc.running = true
-    pump()
   }
 
   function enqueue(job) {
@@ -157,9 +168,11 @@ Item {
         chmodProc.running = true
         return
       }
-      var parsed = Model.parseAccounts(text())
+      var raw = text()
+      var parsed = Model.parseAccounts(raw)
       root.foundFile = true
       root.accounts = parsed
+      root.prefs = Model.parsePrefs(raw)
       var lookups = 0
       for (var i = 0; i < parsed.length; i++) {
         if (parsed[i].hasPassword) {
@@ -172,6 +185,7 @@ Item {
     onLoadFailed: {
       root.foundFile = false
       root.accounts = []
+      root.prefs = Model.defaultPrefs()
       root.finishLoad()
     }
   }
