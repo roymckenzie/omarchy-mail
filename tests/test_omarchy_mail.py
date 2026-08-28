@@ -432,5 +432,25 @@ class TestImapParsing(unittest.TestCase):
         self.assertEqual(emails, ["maya@example.com", "luis@example.com"])
 
 
+class TestOutgoing(unittest.TestCase):
+    def test_outgoing_from_uses_account(self):
+        account = {"email": "work@example.com", "fromName": "Work", "name": "Office"}
+        msg = mail.build_outgoing(
+            account,
+            {"subject": "Hi", "body": "hello"},
+            [("Maya", "maya@example.com")],
+            [],
+            [],
+            False,
+            False,
+        )
+        self.assertEqual(msg["From"], "Work <work@example.com>")
+
+    def test_draft_replace_account_id(self):
+        self.assertEqual(mail.draft_replace_account_id({"replaceAccount": "b"}, "a"), "b")
+        self.assertEqual(mail.draft_replace_account_id({}, "a"), "a")
+        self.assertEqual(mail.draft_replace_account_id({"replaceAccount": "all"}, "a"), "a")
+
+
 if __name__ == "__main__":
     unittest.main()

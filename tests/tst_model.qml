@@ -155,4 +155,17 @@ TestCase {
     verify(html.indexOf("World") >= 0)
     verify(html.indexOf("<br") >= 0)
   }
+
+  function test_resolvedComposeAccountId() {
+    var accounts = [
+      { id: "personal", email: "me@home.example" },
+      { id: "work", email: "me@work.example" }
+    ]
+    compare(Model.resolvedComposeAccountId(accounts, "work", "personal", "personal"), "work")
+    compare(Model.resolvedComposeAccountId(accounts, "", "personal", "work"), "personal")
+    compare(Model.resolvedComposeAccountId(accounts, "", "all", "work"), "work")
+    compare(Model.resolvedComposeAccountId(accounts, "", "all", ""), "personal")
+    compare(Model.resolvedComposeAccountId(accounts, "gone", "all", ""), "personal")
+    compare(Model.resolvedComposeAccountId([], "", "all", ""), "")
+  }
 }

@@ -17,6 +17,14 @@ function accountName(accounts, id) {
   return account ? account.name : id
 }
 
+function resolvedComposeAccountId(accounts, fromId, filterId, selectedId) {
+  if (fromId && accountById(accounts, fromId)) return fromId
+  if (filterId && filterId !== "all") return filterId
+  if (selectedId && selectedId !== "all") return selectedId
+  if (accounts && accounts.length) return accounts[0].id
+  return ""
+}
+
 function mailboxOf(conversation) {
   return conversation && conversation.mailbox ? conversation.mailbox : "inbox"
 }

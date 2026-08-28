@@ -1757,6 +1757,24 @@ def request_account_id(state: State, req: dict[str, Any]) -> str:
     return account
 
 
+def draft_replace_account_id(req: dict[str, Any], account_id: str) -> str:
+    replace = str(req.get("replaceAccount") or "")
+    if replace and replace != "all":
+        return replace
+    return account_id
+
+
+def delete_draft_uids(state: State, account_id: str, uids: list[int]) -> None:
+    if not uids:
+        return
+
+    def work(_account, imap):
+        drafts = resolve_mailbox(imap, "drafts")
+        delete_uids(imap, drafts, uids)
+
+    state.with_session(account_id, work)
+
+
 def request_mailbox_role(req: dict[str, Any]) -> str:
     return str(req.get("mailbox") or "inbox") or "inbox"
 
@@ -2076,16 +2094,19 @@ def send_cmd(state: State, req: dict[str, Any]) -> dict[str, Any]:
     raw = email_msg.as_bytes()
     replace_drafts = str(req.get("mailbox") or "") == "drafts"
     replace_uids = [int(u) for u in (req.get("uids") or []) if u]
+    replace_account = draft_replace_account_id(req, account_id)
     saved = True
     try:
         def work(_account, imap):
             sent = resolve_mailbox(imap, "sent")
             append_raw(imap, sent, r"(\Seen)", raw)
-            if replace_drafts and replace_uids:
+            if replace_drafts and replace_uids and replace_account == account_id:
                 drafts = resolve_mailbox(imap, "drafts")
                 delete_uids(imap, drafts, replace_uids)
 
         state.with_session(account_id, work)
+        if replace_drafts and replace_uids and replace_account != account_id:
+            delete_draft_uids(state, replace_account, replace_uids)
     except Exception:
         saved = False
     return {"id": req["id"], "ok": True, "saved": saved}
@@ -2109,14 +2130,17 @@ def draft_cmd(state: State, req: dict[str, Any]) -> dict[str, Any]:
     email_msg = build_outgoing(account, req, to, cc, bcc, True, True)
     raw = email_msg.as_bytes()
     replace_uids = [int(u) for u in (req.get("uids") or []) if u]
+    replace_account = draft_replace_account_id(req, account_id)
 
     def work(_account, imap):
         drafts = resolve_mailbox(imap, "drafts")
         append_raw(imap, drafts, r"(\Seen \Draft)", raw)
-        if replace_uids:
+        if replace_uids and replace_account == account_id:
             delete_uids(imap, drafts, replace_uids)
 
     state.with_session(account_id, work)
+    if replace_uids and replace_account != account_id:
+        delete_draft_uids(state, replace_account, replace_uids)
     return {"id": req["id"], "ok": True}
 
 

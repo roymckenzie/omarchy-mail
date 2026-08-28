@@ -74,7 +74,9 @@ Attachments on a thread open with a click and save to Downloads on right-click.
 Compose and reply attach through an out-of-process portal picker (the panel
 closes for the dialog, then restores the draft). Compose sends over SMTP and
 appends a copy to Sent. Save Draft appends to the account Drafts folder.
-Opening a draft uses the compose pane; Sent is a reading pane.
+With more than one account, click From in compose to pick which address
+sends the message; Send and Save Draft use that account's SMTP, Sent, and
+Drafts. Opening a draft uses the compose pane; Sent is a reading pane.
 
 The To/Cc/Bcc fields autocomplete from addresses harvested from IMAP envelopes
 (From on inbox, To/Cc on sent). HTML mail is rendered as a small block model

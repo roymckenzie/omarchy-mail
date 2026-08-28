@@ -14,6 +14,7 @@ Item {
   readonly property var composeSubjectField: composeSubjectFieldImpl
   readonly property var composeBodyField: composeBodyFieldImpl
   readonly property var composeSuggestPopup: composeSuggestPopupImpl
+  readonly property var composeFromPopup: composeFromPopupImpl
   readonly property var addrBlock: addrBlockImpl
 
 Column {
@@ -73,14 +74,180 @@ Column {
     }
   }
 
-  Text {
+  Item {
+    id: fromRow
     visible: host.liveMail && host.composeFromLabel !== ""
     width: parent.width
-    text: "From  " + host.composeFromLabel
-    color: host.dim
-    font.family: host.contentFontFamily
-    font.pixelSize: Style.font.bodySmall
-    elide: Text.ElideRight
+    height: fromLine.implicitHeight
+    z: 3
+
+    Row {
+      id: fromLine
+      width: parent.width
+      spacing: Style.space(6)
+
+      Text {
+        id: fromPrefix
+        text: "From"
+        color: host.dim
+        font.family: host.contentFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        id: fromLabel
+        width: parent.width - fromPrefix.width - (fromChevron.visible ? fromChevron.width + parent.spacing : 0)
+          - parent.spacing
+        text: host.composeFromLabel
+        color: (fromMouse.containsMouse || composeFromPopupImpl.opened)
+          ? host.contentForeground
+          : host.dim
+        font.family: host.contentFontFamily
+        font.pixelSize: Style.font.bodySmall
+        elide: Text.ElideRight
+      }
+
+      Text {
+        id: fromChevron
+        visible: host.composeFromCanPick
+        text: "󰅀"
+        color: fromLabel.color
+        font.family: host.contentFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+    }
+
+    MouseArea {
+      id: fromMouse
+      anchors.fill: parent
+      enabled: host.composeFromCanPick
+      hoverEnabled: true
+      cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+      onClicked: composeFromPopupImpl.opened ? composeFromPopupImpl.close() : composeFromPopupImpl.open()
+    }
+
+    PanelToolTip {
+      visible: fromMouse.containsMouse && host.composeFromCanPick && !composeFromPopupImpl.opened
+      text: "Send as this account"
+      fontFamily: host.contentFontFamily
+    }
+
+    Popup {
+      id: composeFromPopupImpl
+      parent: fromRow
+      x: 0
+      y: fromRow.height + Style.spacing.xxs
+      width: fromRow.width
+      padding: Style.spacing.hairline
+      focus: true
+      closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+      background: BorderSurface {
+        color: Color.popups.background
+        borderSpec: Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, Style.normalBorderWidth)
+        radius: Style.cornerRadius
+      }
+
+      onOpened: {
+        fromList.currentIndex = Model.indexOfId(host.accounts, host.composeAccountId)
+        fromList.forceActiveFocus()
+      }
+
+      contentItem: ListView {
+        id: fromList
+        implicitHeight: Math.min(contentHeight, Style.space(220))
+        clip: true
+        spacing: Style.spacing.labelGap
+        boundsBehavior: Flickable.StopAtBounds
+        model: host.accounts
+        currentIndex: -1
+        interactive: contentHeight > Style.space(220)
+        height: Math.min(contentHeight, Style.space(220))
+
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: function(event) {
+          if (event.key === Qt.Key_Escape) {
+            composeFromPopupImpl.close()
+            event.accepted = true
+          } else if (event.key === Qt.Key_Down || event.text === "j") {
+            fromList.currentIndex = Math.min(host.accounts.length - 1, fromList.currentIndex + 1)
+            event.accepted = true
+          } else if (event.key === Qt.Key_Up || event.text === "k") {
+            fromList.currentIndex = Math.max(0, fromList.currentIndex - 1)
+            event.accepted = true
+          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            fromList.selectCurrent()
+            event.accepted = true
+          }
+        }
+
+        function selectCurrent() {
+          var acc = fromList.currentIndex >= 0 && fromList.currentIndex < host.accounts.length
+            ? host.accounts[fromList.currentIndex]
+            : null
+          if (!acc) return
+          host.setComposeFrom(acc.id)
+          composeFromPopupImpl.close()
+        }
+
+        delegate: Item {
+          required property var modelData
+          required property int index
+          readonly property bool isFrom: String(modelData.id || "") === String(host.composeAccountId || "")
+          width: fromList.width
+          height: Style.spacing.popupRowHeight
+
+          Rectangle {
+            anchors.fill: parent
+            color: isFrom
+              ? Style.selectedFillFor(host.contentForeground, Color.accent)
+              : (index === fromList.currentIndex
+                ? Style.hoverFillFor(host.contentForeground, Color.accent)
+                : "transparent")
+          }
+
+          Column {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.leftMargin: Style.spacing.controlPaddingX
+            anchors.rightMargin: Style.spacing.controlPaddingX
+            spacing: 0
+
+            Text {
+              width: parent.width
+              text: modelData.name || modelData.email || "Account"
+              color: isFrom
+                ? Style.selectedStateColor(host.contentForeground, Color.accent)
+                : host.contentForeground
+              font.family: host.contentFontFamily
+              font.pixelSize: Style.font.body
+              font.bold: isFrom
+              elide: Text.ElideRight
+            }
+
+            Text {
+              visible: String(modelData.email || "") !== ""
+                && String(modelData.name || "").toLowerCase() !== String(modelData.email || "").toLowerCase()
+              width: parent.width
+              text: modelData.email
+              color: host.dim
+              font.family: host.contentFontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+          }
+
+          MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onPositionChanged: fromList.currentIndex = parent.index
+            onClicked: fromList.selectCurrent()
+          }
+        }
+      }
+    }
   }
 
   Column {

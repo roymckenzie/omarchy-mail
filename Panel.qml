@@ -57,6 +57,7 @@ Panel {
   property bool composeHold: false
   property bool suppressSelection: false
   property string composeLoadedId: ""
+  property string composeFromId: ""
   property var outgoingFiles: []
   property bool keepCompose: false
   property string searchQuery: ""
@@ -168,8 +169,11 @@ Panel {
   readonly property var composeMatches: composePane
     ? Model.filterContacts(composeContactList, Model.addressDraft(composeAddrDraft), 8)
     : []
+  readonly property bool composeFromCanPick: accounts.length > 1
+  readonly property string composeAccountId: Model.resolvedComposeAccountId(
+    accounts, composeFromId, accountId, selected && selected.accountId)
   readonly property string composeFromLabel: {
-    var acc = Model.accountById(accounts, composeAccountId())
+    var acc = Model.accountById(accounts, composeAccountId)
     return acc ? Model.formatAddress(Model.accountFromName(acc), acc.email) : ""
   }
   readonly property string composeTitle: {
@@ -219,6 +223,7 @@ Panel {
   readonly property var composeSubjectField: composePaneItem.composeSubjectField
   readonly property var composeBodyField: composePaneItem.composeBodyField
   readonly property var composeSuggestPopup: composePaneItem.composeSuggestPopup
+  readonly property var composeFromPopup: composePaneItem.composeFromPopup
   readonly property var addrBlock: composePaneItem.addrBlock
   readonly property var accNameField: settingsPane.accNameField
   readonly property var accFromNameField: settingsPane.accFromNameField
@@ -265,6 +270,7 @@ Panel {
     composing = false
     replyOpen = false
     replyText = ""
+    composeFromId = ""
     clearComposeAddrs()
     composeSubject = ""
     composeBody = ""
@@ -399,6 +405,11 @@ Panel {
     scheduleFetch(visibleInbox[index])
   }
 
+  function focusKeyCatcher() {
+    if (composeFromPopup && composeFromPopup.opened) composeFromPopup.close()
+    if (keyCatcher) Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
   function setAccount(id) {
     if (id === accountId) return
     var previous = accountId
@@ -409,6 +420,7 @@ Panel {
     suppressSelection = false
     listCursorTouched = false
     paneFocus = "list"
+    focusKeyCatcher()
     if (liveMail && previous === "all" && id !== "all") {
       ensureSelection()
       return
@@ -427,6 +439,7 @@ Panel {
     composing = false
     replyOpen = false
     paneFocus = "list"
+    focusKeyCatcher()
     if (liveMail) mail.clearList()
     ensureSelection()
     syncLive()
@@ -444,6 +457,7 @@ Panel {
     composing = false
     scrollSelectedIntoView()
     scheduleFetch(conv)
+    focusKeyCatcher()
   }
 
   function focusPane(which) {
@@ -612,11 +626,16 @@ Panel {
     return String(replyAllRecips && replyAllRecips.cc || "")
   }
 
-  function composeAccountId() {
-    if (accountId && accountId !== "all") return accountId
-    if (selected && selected.accountId && selected.accountId !== "all") return selected.accountId
-    if (accounts.length) return accounts[0].id
-    return ""
+  function defaultComposeAccountId() {
+    return Model.resolvedComposeAccountId(accounts, "", accountId, selected && selected.accountId)
+  }
+
+  function setComposeFrom(id) {
+    if (!id || !Model.accountById(accounts, id)) return
+    if (id === composeFromId) return
+    composeFromId = id
+    markComposeDirty()
+    mail.sendError = ""
   }
 
   function finishSend() {
@@ -672,6 +691,11 @@ Panel {
     selectedId = ""
     pendingSelectId = ""
     pendingSelectIndex = 0
+    var fromId = composeAccountId
+    if (fromId && accountId !== "all" && accountId !== fromId) {
+      accountId = fromId
+      if (liveMail) mail.clearList()
+    }
     if (!liveMail) {
       mailboxId = "drafts"
       ensureSelection()
@@ -839,6 +863,16 @@ Panel {
     })
   }
 
+  function attachDraftReplace(extra) {
+    if (composing || mailboxId !== "drafts" || !selected) return
+    extra.uids = mail.mailboxUids(selected)
+    extra.items = selected.items || []
+    extra.conv = selected.id
+    var orig = selected.accountId
+    if (orig && orig !== extra.account)
+      extra.replaceAccount = orig
+  }
+
   function saveDraft() {
     if (composeBusy()) return
     var to = String(composeTo || "").replace(/^\s+|\s+$/g, "")
@@ -849,7 +883,7 @@ Panel {
     if (to === "" && cc === "" && bcc === "" && subject === "" && body === "" && outgoingPaths().length === 0) return
     if (!liveMail) return
     var extra = {
-      account: composeAccountId(),
+      account: composeAccountId,
       toList: Model.splitAddresses(composeTo),
       ccList: Model.splitAddresses(composeCc),
       bccList: Model.splitAddresses(composeBcc),
@@ -857,11 +891,7 @@ Panel {
       body: composeBody,
       files: outgoingPaths()
     }
-    if (!composing && mailboxId === "drafts" && selected) {
-      extra.uids = mail.mailboxUids(selected)
-      extra.items = selected.items || []
-      extra.conv = selected.id
-    }
+    attachDraftReplace(extra)
     mail.saveDraft(extra)
   }
 
@@ -903,10 +933,12 @@ Panel {
     var nextSubject = conv.subject || ""
     var nextBody = Model.conversationBody(conv)
     if (nextBody === "" && String(composeBody || "") !== "") {
+      composeFromId = conv.accountId || defaultComposeAccountId()
       composeLoadedId = conv.id
       return
     }
     composeHydrating = true
+    composeFromId = conv.accountId || defaultComposeAccountId()
     composeTo = nextTo
     composeCc = nextCc
     composeBcc = nextBcc
@@ -968,6 +1000,7 @@ Panel {
     composeHold = false
     suppressSelection = false
     composeHydrating = true
+    composeFromId = conv.accountId || defaultComposeAccountId()
     clearComposeAddrs()
     composeSubject = Model.forwardSubject(conv.subject)
     composeBody = Model.forwardBody(conv)
@@ -1019,6 +1052,7 @@ Panel {
     composeHold = false
     suppressSelection = false
     composeHydrating = true
+    composeFromId = defaultComposeAccountId()
     clearComposeAddrs()
     composeSubject = ""
     composeBody = ""
@@ -1034,6 +1068,7 @@ Panel {
   }
 
   function cancelCompose() {
+    if (composeFromPopup && composeFromPopup.opened) composeFromPopup.close()
     composing = false
     forwarding = false
     pendingForward = false
@@ -1045,6 +1080,7 @@ Panel {
     if (outboundMailbox && selected) fillComposeFrom(selected)
     else {
       composeHydrating = true
+      composeFromId = ""
       clearComposeAddrs()
       composeSubject = ""
       composeBody = ""
@@ -1122,7 +1158,7 @@ Panel {
     var bccList = Model.splitAddresses(composeBcc)
     if (!recips.length && !ccList.length && !bccList.length) return
     var extra = {
-      account: composeAccountId(),
+      account: composeAccountId,
       toList: recips,
       ccList: ccList,
       bccList: bccList,
@@ -1130,11 +1166,7 @@ Panel {
       body: composeBody,
       files: files
     }
-    if (!composing && mailboxId === "drafts" && selected) {
-      extra.uids = mail.mailboxUids(selected)
-      extra.items = selected.items || []
-      extra.conv = selected.id
-    }
+    attachDraftReplace(extra)
     mail.sendMail(extra)
   }
 
@@ -1391,6 +1423,11 @@ Panel {
 
   function handleEditorKey(event, onEnter) {
     if (event.key === Qt.Key_Escape) {
+      if (composeFromPopup && composeFromPopup.opened) {
+        composeFromPopup.close()
+        event.accepted = true
+        return
+      }
       if (composing) cancelCompose()
       else if (replyOpen) cancelReply()
       else {
@@ -1556,11 +1593,13 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: root.composing || replyField.editorFocused || composeToField.activeFocus
-        || composeCcField.activeFocus || composeBccField.activeFocus
-        || composeSubjectField.activeFocus || composeBodyField.editorFocused
+      blocked: root.composing || (root.replyOpen && replyField.editorFocused)
+        || (root.composePane && (composeToField.activeFocus || composeCcField.activeFocus
+          || composeBccField.activeFocus || composeSubjectField.activeFocus
+          || composeBodyField.editorFocused))
         || mailboxPicker.popupOpen || root.settingsFieldFocused
         || listSearchField.activeFocus || helpPopup.opened || composeSuggestPopup.opened
+        || composeFromPopup.opened
       onMoveRequested: function(dx, dy) {
         if (root.settingsOpen) {
           if (dy !== 0) root.selectSettingsAt(root.settingsIndex + dy)
