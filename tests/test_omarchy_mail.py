@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 import unittest
@@ -470,6 +471,40 @@ class TestOutgoing(unittest.TestCase):
             self.assertIn("x-scheme-handler/mailto", text)
             self.assertIn("omarchy-mail compose", text)
             self.assertEqual(mail.parse_desktop_name(text), "Mail")
+
+
+class TestListCache(unittest.TestCase):
+    def round_trip(self, unread, conversations):
+        accounts = [{"id": aid} for aid in unread]
+        with tempfile.TemporaryDirectory() as tmp:
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = tmp
+            try:
+                mail.save_list_cache(conversations, [], unread, "inbox")
+                return mail.load_list_cache(accounts, "inbox")
+            finally:
+                if old_home is None:
+                    del os.environ["HOME"]
+                else:
+                    os.environ["HOME"] = old_home
+
+    def test_unread_is_per_account_not_the_total(self):
+        unread = {"acct1": 3, "acct2": 4}
+        convs = [
+            {"accountId": "acct1", "id": "c1", "when": ""},
+            {"accountId": "acct2", "id": "c2", "when": ""},
+        ]
+        total, cached, _contacts = self.round_trip(unread, convs)
+        self.assertEqual(total, 7)
+        self.assertEqual(len(cached), 2)
+
+    def test_account_without_conversations_still_caches_its_count(self):
+        # acct2's messages fell outside the page, so it contributes no conversation rows
+        unread = {"acct1": 3, "acct2": 4}
+        convs = [{"accountId": "acct1", "id": "c1", "when": ""}]
+        total, cached, _contacts = self.round_trip(unread, convs)
+        self.assertEqual(total, 7)
+        self.assertEqual(len(cached), 1)
 
 
 if __name__ == "__main__":
