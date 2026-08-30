@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from email import policy
 from email.header import decode_header, make_header
@@ -22,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 PAGE = 50
+IMAP_TIMEOUT = 30
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 MAX_TEXT_CHARS = 400_000
@@ -864,7 +866,7 @@ def parse_list_line(raw: bytes | str) -> tuple[str, list[str]]:
     return name, attrs
 
 
-def connect(account: dict[str, Any], password: str) -> IMAP4:
+def connect(account: dict[str, Any], password: str, timeout: float | None = None) -> IMAP4:
     if not account.get("imapTls", True):
         raise Error("IMAP without TLS is not supported yet")
     try:
@@ -874,7 +876,7 @@ def connect(account: dict[str, Any], password: str) -> IMAP4:
     host = str(account.get("imapHost") or "")
     ctx = ssl.create_default_context()
     try:
-        imap = IMAP4_SSL(host, port, ssl_context=ctx)
+        imap = IMAP4_SSL(host, port, ssl_context=ctx, timeout=timeout)
         imap.login(str(account.get("username") or ""), password)
     except Exception as exc:
         raise Error(f"login failed: {exc}") from exc
@@ -1738,7 +1740,7 @@ class State:
             try:
                 if account_id not in self.sessions:
                     password = lookup_password(account_id)
-                    imap = connect(account, password)
+                    imap = connect(account, password, IMAP_TIMEOUT)
                     self.sessions[account_id] = (account, password, imap)
                 _account, _password, imap = self.sessions[account_id]
                 return fn(account, imap)
@@ -1862,10 +1864,10 @@ def move_uids(imap: IMAP4, src: str, dest: str, uids: list[int]) -> None:
         raise Error("couldn't move messages")
 
 
-def list_mailbox(account: dict[str, Any], imap: IMAP4, role: str, limit: int, query: str, body_fallback: bool):
+def list_mailbox(account: dict[str, Any], imap: IMAP4, role: str, limit: int, query: str, body_fallback: bool, want_unread: bool = True):
     mailbox = resolve_mailbox(imap, role)
     exists = exists_count(imap, mailbox)
-    unread = unseen_count(imap)
+    unread = unseen_count(imap) if want_unread else 0
     spec, use_uid = query_set(imap, exists, limit, query, body_fallback)
     if not spec:
         return unread, []
@@ -1887,7 +1889,7 @@ def list_account(account: dict[str, Any], imap: IMAP4, role: str, limit: int, qu
         extra = "inbox"
     if extra:
         try:
-            _n, extra_rows = list_mailbox(account, imap, extra, max(limit, 100), query, False)
+            _n, extra_rows = list_mailbox(account, imap, extra, max(limit, 100), query, False, want_unread=False)
             rows.extend(extra_rows)
         except Exception:
             pass
@@ -1899,12 +1901,17 @@ def list_cmd(state: State, req: dict[str, Any]) -> dict[str, Any]:
     mailbox = str(req.get("mailbox") or "inbox") or "inbox"
     limit = int(req.get("limit") or PAGE)
     query = str(req.get("query") or "")
+
+    def one(acc):
+        return state.with_session(acc["id"], lambda account, imap: list_account(account, imap, mailbox, limit, query))
+
     unread = 0
     rows: list[dict[str, Any]] = []
-    for acc in accounts:
-        count, part = state.with_session(acc["id"], lambda account, imap: list_account(account, imap, mailbox, limit, query))
-        unread += count
-        rows.extend(part)
+    # Each account has its own IMAP socket keyed by account id, so the threads never share one.
+    with ThreadPoolExecutor(max_workers=max(1, min(len(accounts), 8))) as pool:
+        for count, part in pool.map(one, accounts):
+            unread += count
+            rows.extend(part)
     contacts = collect_contacts(accounts, rows)
     conversations = group_rows(rows, mailbox)
     if len(conversations) > limit:
