@@ -1321,8 +1321,11 @@ def load_list_cache(accounts: list[dict[str, Any]], mailbox: str):
     return unread, conversations, contacts
 
 
-def save_list_cache(conversations: list[dict[str, Any]], contacts: list[dict[str, str]], unread: int, mailbox: str) -> None:
-    by_account: dict[str, dict[str, Any]] = {}
+def save_list_cache(conversations: list[dict[str, Any]], contacts: list[dict[str, str]], unread: dict[str, int], mailbox: str) -> None:
+    by_account: dict[str, dict[str, Any]] = {
+        aid: {"unread": int(count or 0), "conversations": [], "contacts": []}
+        for aid, count in unread.items()
+    }
     for conv in conversations:
         aid = conv.get("accountId") or ""
         entry = by_account.setdefault(aid, {"unread": 0, "conversations": [], "contacts": []})
@@ -1332,8 +1335,6 @@ def save_list_cache(conversations: list[dict[str, Any]], contacts: list[dict[str
     if by_account:
         first = next(iter(by_account.values()))
         first["contacts"] = list(contacts)
-    for entry in by_account.values():
-        entry["unread"] = unread
     for account_id, cache in by_account.items():
         save_account_cache(account_id, mailbox, cache)
 
@@ -1906,18 +1907,20 @@ def list_cmd(state: State, req: dict[str, Any]) -> dict[str, Any]:
         return state.with_session(acc["id"], lambda account, imap: list_account(account, imap, mailbox, limit, query))
 
     unread = 0
+    by_account: dict[str, int] = {}
     rows: list[dict[str, Any]] = []
     # Each account has its own IMAP socket keyed by account id, so the threads never share one.
     with ThreadPoolExecutor(max_workers=max(1, min(len(accounts), 8))) as pool:
-        for count, part in pool.map(one, accounts):
+        for acc, (count, part) in zip(accounts, pool.map(one, accounts)):
             unread += count
+            by_account[str(acc["id"])] = count
             rows.extend(part)
     contacts = collect_contacts(accounts, rows)
     conversations = group_rows(rows, mailbox)
     if len(conversations) > limit:
         conversations = conversations[:limit]
     if not query.strip():
-        save_list_cache(conversations, contacts, unread, mailbox)
+        save_list_cache(conversations, contacts, by_account, mailbox)
     return {
         "id": req["id"],
         "ok": True,
