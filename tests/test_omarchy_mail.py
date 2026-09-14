@@ -264,6 +264,7 @@ class TestMime(unittest.TestCase):
         self.assertEqual(parsed["attachments"], [])
         self.assertEqual(len(parsed["cc"]), 1)
         self.assertEqual(parsed["cc"][0]["email"], "luis@example.com")
+        self.assertEqual(parsed["replyTo"], [])
 
     def test_html_alternative_keeps_plain(self):
         raw = self._message(with_html=True).as_bytes()
@@ -344,6 +345,34 @@ class TestMime(unittest.TestCase):
     def test_safe_filename_strips_paths(self):
         self.assertEqual(mail.safe_filename("../../etc/passwd"), "passwd")
         self.assertEqual(mail.safe_filename(""), "attachment")
+
+    def test_parse_message_reply_to(self):
+        msg = self._message()
+        msg["Reply-To"] = "Tickets <tickets@example.com>"
+        parsed = mail.parse_message({"email": "you@example.com"}, "inbox", 1, msg.as_bytes())
+        self.assertEqual(len(parsed["replyTo"]), 1)
+        self.assertEqual(parsed["replyTo"][0]["email"], "tickets@example.com")
+        self.assertEqual(parsed["replyTo"][0]["name"], "Tickets")
+        self.assertEqual(parsed["fromEmail"], "maya@example.com")
+
+    def test_fetch_headers_include_reply_to(self):
+        self.assertIn("REPLY-TO", mail.FETCH_HEADERS)
+        self.assertIn("IN-REPLY-TO", mail.FETCH_HEADERS)
+
+    def test_headers_from_bytes_reply_to(self):
+        raw = b"From: Maya <maya@example.com>\r\nReply-To: Tickets <tickets@example.com>\r\n\r\n"
+        headers = mail.headers_from_bytes(raw)
+        self.assertEqual(headers.get("reply-to"), "Tickets <tickets@example.com>")
+
+    def test_stub_oversized_keeps_reply_to(self):
+        stub = mail.stub_oversized_message(
+            {"email": "you@example.com"},
+            "inbox",
+            9,
+            True,
+            {"body": b"From: Maya <maya@example.com>\r\nReply-To: Tickets <tickets@example.com>\r\n\r\n"},
+        )
+        self.assertEqual(stub["replyTo"][0]["email"], "tickets@example.com")
 
     def test_mine_uses_account_email(self):
         msg = self._message()

@@ -62,6 +62,18 @@ TestCase {
     compare(Model.replyAddress(conv, "you@example.com"), "Maya Chen <maya@example.com>")
   }
 
+  function test_replyAddress_uses_replyTo() {
+    var conv = sampleThread()
+    conv.messages[0].replyTo = [{ name: "Maya via List", email: "list@example.com", mine: false }]
+    compare(Model.replyAddress(conv, "you@example.com"), "Maya via List <list@example.com>")
+  }
+
+  function test_replyAddress_empty_replyTo_falls_back_to_from() {
+    var conv = sampleThread()
+    conv.messages[0].replyTo = []
+    compare(Model.replyAddress(conv, "you@example.com"), "Maya Chen <maya@example.com>")
+  }
+
   function test_replyAll_puts_others_on_cc() {
     var recips = Model.replyAllRecipients(sampleThread(), "you@example.com")
     compare(recips.to, "Maya Chen <maya@example.com>")
@@ -85,6 +97,17 @@ TestCase {
     var recips = Model.replyAllRecipients(conv, "you@example.com")
     compare(recips.to, "Maya Chen <maya@example.com>")
     compare(recips.cc, "Luis Ortega <luis@example.com>")
+  }
+
+  function test_replyAll_uses_replyTo_as_to() {
+    var conv = sampleThread()
+    conv.messages[0].replyTo = [{ name: "Tickets", email: "tickets@example.com", mine: false }]
+    var recips = Model.replyAllRecipients(conv, "you@example.com")
+    compare(recips.to, "Tickets <tickets@example.com>")
+    verify(recips.cc.indexOf("maya@example.com") < 0)
+    verify(recips.cc.indexOf("luis@example.com") >= 0)
+    verify(recips.cc.indexOf("priya@example.com") >= 0)
+    verify(recips.cc.indexOf("you@example.com") < 0)
   }
 
   function test_nextSelectionIndex_keeps_current_and_does_not_auto_pick() {

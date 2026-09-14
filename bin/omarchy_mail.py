@@ -29,7 +29,7 @@ MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 MAX_TEXT_CHARS = 400_000
 FETCH_HEADERS = (
     "(UID FLAGS INTERNALDATE "
-    "BODY.PEEK[HEADER.FIELDS (FROM TO CC BCC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO)])"
+    "BODY.PEEK[HEADER.FIELDS (FROM TO CC BCC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO REPLY-TO)])"
 )
 FETCH_SIZE = "(UID RFC822.SIZE FLAGS)"
 
@@ -1082,7 +1082,7 @@ def headers_from_bytes(raw: bytes) -> dict[str, str]:
         return {}
     msg = BytesParser(policy=policy.default).parsebytes(raw)
     out = {}
-    for key in ("Subject", "From", "To", "Cc", "Bcc", "Date", "Message-ID", "References", "In-Reply-To"):
+    for key in ("Subject", "From", "To", "Cc", "Bcc", "Date", "Message-ID", "References", "In-Reply-To", "Reply-To"):
         value = msg.get(key)
         if value:
             out[key.lower()] = decode_mime_words(str(value))
@@ -1378,13 +1378,15 @@ def stub_oversized_message(
     account: dict[str, Any], mailbox: str, uid: int, unread: bool, header_item: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     from_name, from_email, when = "", "", ""
+    me = str(account.get("email") or "")
+    reply_to: list[dict[str, Any]] = []
     if header_item:
         headers = headers_from_bytes(header_item.get("body") or b"")
         people = people_from_header(headers.get("from", ""))
         if people:
             from_name, from_email = people[0]
         when = headers.get("date") or header_item.get("internaldate") or ""
-    me = str(account.get("email") or "")
+        reply_to = parse_address_list(headers.get("reply-to", ""), me)
     mine = bool(from_email) and from_email.lower() == me.lower()
     note = "This message is too large to open in Mail."
     return {
@@ -1398,6 +1400,7 @@ def stub_oversized_message(
         "messageId": "",
         "inReplyTo": "",
         "references": "",
+        "replyTo": reply_to,
         "to": [],
         "cc": [],
         "bcc": [],
@@ -1546,6 +1549,7 @@ def parse_message(
         "messageId": str(msg.get("Message-ID") or ""),
         "inReplyTo": str(msg.get("In-Reply-To") or ""),
         "references": str(msg.get("References") or ""),
+        "replyTo": parse_address_list(str(msg.get("Reply-To") or ""), me),
         "to": parse_address_list(str(msg.get("To") or ""), me),
         "cc": parse_address_list(str(msg.get("Cc") or ""), me),
         "bcc": parse_address_list(str(msg.get("Bcc") or ""), me),

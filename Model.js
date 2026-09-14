@@ -622,11 +622,21 @@ function contactsFromInbox(inbox, accounts) {
   return mergeContacts([], incoming)
 }
 
+function messageReplyTo(msg) {
+  if (!msg) return ""
+  var formatted = formatAddressList(msg.replyTo, true)
+  if (formatted !== "") return formatted
+  if (msg.fromEmail) return formatAddress(msg.from, msg.fromEmail)
+  return ""
+}
+
 function replyAddress(conversation, accountEmail) {
   var messages = conversation && conversation.messages ? conversation.messages : []
   for (var i = messages.length - 1; i >= 0; i--) {
-    if (messages[i] && !messages[i].mine && messages[i].fromEmail)
-      return formatAddress(messages[i].from, messages[i].fromEmail)
+    if (messages[i] && !messages[i].mine) {
+      var addr = messageReplyTo(messages[i])
+      if (addr !== "") return addr
+    }
   }
   var msg = outboundMessage(conversation)
   if (msg && msg.to && msg.to.length) {
@@ -683,7 +693,9 @@ function replyAllRecipients(conversation, accountEmail) {
   }
   if (msg) {
     if (!msg.mine) {
-      add(to, msg.from, msg.fromEmail)
+      var before = to.length
+      addList(to, msg.replyTo)
+      if (to.length === before) add(to, msg.from, msg.fromEmail)
       addList(cc, msg.to)
       addList(cc, msg.cc)
     } else {
