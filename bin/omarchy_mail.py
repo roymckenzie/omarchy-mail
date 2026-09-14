@@ -1969,11 +1969,10 @@ def fetch_cmd(state: State, req: dict[str, Any]) -> dict[str, Any]:
     for item in locations:
         role = str(item.get("mailbox") or "inbox") or "inbox"
         grouped.setdefault(role, []).append(int(item.get("uid") or 0))
-    viewed = str(req.get("mailbox") or "inbox") or "inbox"
 
     def work(account, imap):
+        # BODY.PEEK only. Viewing sets \Seen through seen_cmd, not fetch.
         messages = []
-        seen_sets = []
         for role, uids in grouped.items():
             uids = sorted({u for u in uids if u})
             try:
@@ -2016,13 +2015,6 @@ def fetch_cmd(state: State, req: dict[str, Any]) -> dict[str, Any]:
                             account, role, item["uid"], body, bool(item.get("unread"))
                         )
                     )
-            if role == viewed:
-                seen_sets.append((mailbox, uids))
-        for mailbox, uids in seen_sets:
-            try:
-                mark_seen(imap, mailbox, uids, True)
-            except Exception:
-                pass
         if not messages:
             raise Error("couldn't fetch messages")
         messages.sort(key=lambda m: message_timestamp(m.get("when") or ""))

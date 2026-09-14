@@ -136,6 +136,18 @@ function indexOfId(list, id) {
   return -1
 }
 
+function nextSelectionIndex(list, selectedId, pendingId, pendingIndex) {
+  if (!list || !list.length) return -1
+  var index = indexOfId(list, selectedId)
+  if (index >= 0) return index
+  if (pendingId) {
+    var prefer = indexOfId(list, pendingId)
+    if (prefer >= 0) return prefer
+  }
+  if (pendingIndex >= 0) return Math.min(pendingIndex, list.length - 1)
+  return -1
+}
+
 function conversationById(inbox, id) {
   var index = indexOfId(inbox, id)
   return index >= 0 ? inbox[index] : null

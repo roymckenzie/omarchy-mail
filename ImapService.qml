@@ -144,18 +144,21 @@ Item {
   }
 
   function setSeen(conversation, seen) {
-    var uid = latestMailboxUid(conversation)
-    if (!uid) return false
+    var uids = mailboxUids(conversation)
+    if (!uids || !uids.length) return false
     var box = conversation.mailbox || root.mailbox
     var account = conversation.accountId
     if (!account || account === "all")
       account = root.accountId !== "all" ? root.accountId : ""
+    var items = []
+    for (var i = 0; i < uids.length; i++)
+      items.push({ mailbox: box, uid: uids[i] })
     _quietUnread = true
     send("seen", {
       account: account,
       mailbox: box,
-      uids: [uid],
-      items: [{ mailbox: box, uid: uid }],
+      uids: uids,
+      items: items,
       unseen: seen === false,
       conv: conversation.id
     })
@@ -579,18 +582,13 @@ Item {
           row = Model.copy(row)
           row.messages = msg.messages
           if (snippet) row.preview = snippet
-          row.unread = false
+          if (_pendingUnread[pending.conv] !== undefined)
+            row.unread = _pendingUnread[pending.conv] === true
         }
         next.push(row)
       }
       conversations = next
-      if (pending.conv) {
-        var flags = Model.copy(unreadFlags)
-        flags[pending.conv] = false
-        unreadFlags = flags
-      }
       if (fetchingId === pending.conv) fetchingId = ""
-      send("status", {})
     }
     if (pending.cmd === "seen") {
       if (pending.conv) {

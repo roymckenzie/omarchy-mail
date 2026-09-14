@@ -428,11 +428,23 @@ Panel {
   }
 
   function scheduleFetch(conv) {
+    if (!root.opened) {
+      fetchDebounce.stop()
+      return
+    }
     if (!conversationNeedsFetch(conv || selected)) {
       fetchDebounce.stop()
       return
     }
     fetchDebounce.restart()
+  }
+
+  function markConversationSeen(conv) {
+    if (!root.opened || !liveMail || !conv) return
+    if (conv.unread !== true) return
+    if (!mail.setSeen(conv, true)) return
+    mail.patchUnread(conv.id, false)
+    mail.unread = Math.max(0, (Number(mail.unread) || 0) - 1)
   }
 
   function neighborAfterRemove(index) {
@@ -444,18 +456,6 @@ Panel {
   function rememberNeighbor(index) {
     pendingSelectId = neighborAfterRemove(index)
     pendingSelectIndex = index
-  }
-
-  function takePendingIndex() {
-    var id = pendingSelectId
-    var idx = pendingSelectIndex
-    pendingSelectId = ""
-    pendingSelectIndex = -1
-    var prefer = id ? Model.indexOfId(visibleInbox, id) : -1
-    if (prefer >= 0) return prefer
-    if (visibleInbox.length === 0) return -1
-    if (idx < 0) return 0
-    return Math.min(idx, visibleInbox.length - 1)
   }
 
   function ensureSelection() {
@@ -475,20 +475,17 @@ Panel {
       fetchDebounce.stop()
       return
     }
-    var index = Model.indexOfId(visibleInbox, selectedId)
-    var pending = pendingSelectId !== "" || pendingSelectIndex >= 0
+    var index = Model.nextSelectionIndex(
+      visibleInbox, selectedId, pendingSelectId, pendingSelectIndex
+    )
+    pendingSelectId = ""
+    pendingSelectIndex = -1
     if (index < 0) {
-      var next = takePendingIndex()
-      if (next < 0) next = 0
-      selectedId = visibleInbox[next].id
-      index = next
-    } else if (!listCursorTouched && !pending) {
-      selectedId = visibleInbox[0].id
-      index = 0
-    } else if (pending) {
-      pendingSelectId = ""
-      pendingSelectIndex = -1
+      selectedId = ""
+      fetchDebounce.stop()
+      return
     }
+    selectedId = visibleInbox[index].id
     scheduleFetch(visibleInbox[index])
   }
 
@@ -500,6 +497,8 @@ Panel {
   function setAccount(id) {
     if (id === accountId) return
     var previous = accountId
+    pendingSelectId = ""
+    pendingSelectIndex = -1
     accountId = id
     composing = false
     replyOpen = false
@@ -522,6 +521,8 @@ Panel {
     if (id !== "drafts") composeHold = false
     suppressSelection = false
     listCursorTouched = false
+    pendingSelectId = ""
+    pendingSelectIndex = -1
     mailboxId = id
     composing = false
     replyOpen = false
@@ -544,6 +545,7 @@ Panel {
     composing = false
     scrollSelectedIntoView()
     scheduleFetch(conv)
+    markConversationSeen(conv)
     focusKeyCatcher()
   }
 
@@ -606,7 +608,7 @@ Panel {
   }
 
   function reloadSelected() {
-    if (!selected) return
+    if (!root.opened || !selected) return
     if (conversationNeedsFetch(selected)) mail.fetchThread(selected)
   }
 
@@ -616,6 +618,7 @@ Panel {
     replyOpen = false
     composing = false
     reloadSelected()
+    markConversationSeen(selected)
   }
 
   function toggleUnread() {
@@ -777,7 +780,7 @@ Panel {
     composeSuggestIndex = 0
     selectedId = ""
     pendingSelectId = ""
-    pendingSelectIndex = 0
+    pendingSelectIndex = -1
     var fromId = composeAccountId
     if (fromId && accountId !== "all" && accountId !== fromId) {
       accountId = fromId
@@ -1675,7 +1678,11 @@ Panel {
     composeLoadedId = ""
     syncComposeFromSelection()
   }
-  onOpenedChanged: if (opened) {
+  onOpenedChanged: {
+    if (!opened) {
+      fetchDebounce.stop()
+      return
+    }
     nowMs = Date.now()
     if (hasOpenDraft()) {
       restoreHeldCompose()
@@ -1686,10 +1693,11 @@ Panel {
     replyOpen = false
     paneFocus = "list"
     gotoPending = false
-    listCursorTouched = false
     if (helpPopup.opened) helpPopup.close()
     syncComposeFromSelection()
     ensureSelection()
+    scrollSelectedIntoView()
+    markConversationSeen(selected)
     if (liveMail) mail.refresh(true)
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }

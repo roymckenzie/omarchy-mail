@@ -87,6 +87,19 @@ TestCase {
     compare(recips.cc, "Luis Ortega <luis@example.com>")
   }
 
+  function test_nextSelectionIndex_keeps_current_and_does_not_auto_pick() {
+    var list = [{ id: "a" }, { id: "b" }, { id: "c" }]
+    compare(Model.nextSelectionIndex(list, "b", "", -1), 1)
+    compare(Model.nextSelectionIndex(list, "c", "", -1), 2)
+    compare(Model.nextSelectionIndex(list, "gone", "", -1), -1)
+    compare(Model.nextSelectionIndex(list, "", "", -1), -1)
+    compare(Model.nextSelectionIndex(list, "gone", "c", 0), 2)
+    compare(Model.nextSelectionIndex(list, "gone", "gone", 1), 1)
+    compare(Model.nextSelectionIndex(list, "gone", "", 9), 2)
+    compare(Model.nextSelectionIndex([], "a", "", 0), -1)
+    compare(Model.nextSelectionIndex(null, "a", "", 0), -1)
+  }
+
   function test_filtered_mailbox_and_query() {
     var inbox = [
       { id: "1", mailbox: "inbox", accountId: "a", subject: "Kickoff Friday", preview: "", participants: [] },

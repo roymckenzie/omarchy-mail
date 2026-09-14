@@ -1,3 +1,4 @@
+import inspect
 import os
 import sys
 import tempfile
@@ -397,6 +398,10 @@ class TestImapParsing(unittest.TestCase):
         self.assertIn(f"BODY.PEEK[]<0.{mail.MAX_MESSAGE_BYTES + 1}>", spec)
         self.assertNotIn("RFC822", spec)
         self.assertNotRegex(spec, r"BODY\.PEEK\[\](?!<)")
+
+    def test_fetch_cmd_does_not_mark_seen(self):
+        self.assertNotIn("mark_seen(", inspect.getsource(mail.fetch_cmd))
+        self.assertIn("mark_seen(", inspect.getsource(mail.seen_cmd))
 
     def test_body_overflows_limit(self):
         old = mail.MAX_MESSAGE_BYTES
