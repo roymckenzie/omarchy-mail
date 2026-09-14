@@ -129,6 +129,24 @@ TestCase {
     compare(Model.escapeHtml("a <b> & c"), "a &lt;b&gt; &amp; c")
   }
 
+  function test_safeUrl_rejects_attribute_breakout() {
+    compare(Model.safeUrl("https://example.com/ok"), "https://example.com/ok")
+    compare(Model.safeUrl("mailto:ada@example.com"), "mailto:ada@example.com")
+    compare(Model.safeUrl("https://evil.example/\"onclick=alert(1)"), "")
+    compare(Model.safeUrl("https://evil.example/'foo"), "")
+    compare(Model.safeUrl("javascript:alert(1)"), "")
+  }
+
+  function test_formatBlock_does_not_break_out_of_href() {
+    var markdown = Model.formatBlock("[x](https://evil.example/\"onclick=alert(1))")
+    compare(markdown.indexOf("<a "), -1)
+    compare(markdown.indexOf("onclick"), -1)
+    var auto = Model.formatBlock("see https://evil.example/\"foo")
+    compare(auto.indexOf("<a href=\"https://evil.example/\""), -1)
+    var ok = Model.formatBlock("[docs](https://example.com/a)")
+    compare(ok, "<a href=\"https://example.com/a\">docs</a>")
+  }
+
   function test_bodyRuns_joins_paragraphs() {
     var runs = Model.bodyRuns([
       { type: "p", text: "Hello" },

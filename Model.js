@@ -958,8 +958,16 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
 }
 
+function escapeHtmlAttr(value) {
+  return String(value || "")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
+
 function safeUrl(url) {
   var href = String(url || "").replace(/^\s+|\s+$/g, "")
+  if (!href) return ""
+  if (/[\x00-\x20\x7f\u2028\u2029"'<>\\`]/.test(href)) return ""
   if (/^https?:\/\//i.test(href) || /^mailto:/i.test(href)) return href
   return ""
 }
@@ -975,14 +983,14 @@ function formatBlock(text) {
   s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, label, url) {
     var href = safeUrl(url)
     if (!href) return label
-    return "<a href=\"" + escapeHtml(href) + "\">" + label + "</a>"
+    return "<a href=\"" + escapeHtmlAttr(href) + "\">" + label + "</a>"
   })
   s = s.replace(/(^|[^"'>=])(https?:\/\/[^\s<]+)/gi, function(_, pre, url) {
     var trail = ""
     var core = url.replace(/[),.:;!?]+$/, function(m) { trail = m; return "" })
     var href = safeUrl(core)
     if (!href) return pre + url
-    return pre + "<a href=\"" + escapeHtml(href) + "\">" + core + "</a>" + trail
+    return pre + "<a href=\"" + escapeHtmlAttr(href) + "\">" + core + "</a>" + trail
   })
   s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
   s = s.replace(/`([^`]+)`/g, "<b>$1</b>")
