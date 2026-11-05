@@ -1946,32 +1946,39 @@ def list_cmd(state: State, req: dict[str, Any]) -> dict[str, Any]:
 
 def list_responses(state: State, req: dict[str, Any]) -> Iterator[dict[str, Any]]:
     # A generator, so main() writes the cached page before the IMAP round trip
-    # starts instead of holding it back until the live page is ready.
-    mailbox = str(req.get("mailbox") or "inbox") or "inbox"
-    limit = int(req.get("limit") or PAGE)
+    # starts instead of holding it back until the live page is ready. It runs
+    # after handle()'s try/except has returned, so nothing here may raise: a
+    # cache failure is treated as no cache, and a live failure is reported as an
+    # error response, as handle() did when this was a plain function.
+    rid = req.get("id") or ""
     sent_cached = False
-    if req.get("useCache", True) and not str(req.get("query") or "").strip():
-        try:
+    try:
+        mailbox = str(req.get("mailbox") or "inbox") or "inbox"
+        if req.get("useCache", True) and not str(req.get("query") or "").strip():
+            # A bad limit is left for list_cmd to reject below, so it comes back
+            # as {ok: False} like on master instead of raising here.
+            limit = int(req.get("limit") or PAGE)
             accounts = state.selected_accounts(str(req.get("account") or ""))
-        except Error:
-            accounts = []
-        cached = load_list_cache(accounts, mailbox) if accounts else None
-        if cached:
-            unread, conversations, contacts = cached
-            sent_cached = True
-            yield {
-                "id": req["id"],
-                "ok": True,
-                "cached": True,
-                "unread": unread,
-                "conversations": conversations[:limit],
-                "contacts": contacts,
-            }
+            cached = load_list_cache(accounts, mailbox) if accounts else None
+            if cached:
+                unread, conversations, contacts = cached
+                response = {
+                    "id": rid,
+                    "ok": True,
+                    "cached": True,
+                    "unread": unread,
+                    "conversations": conversations[:limit],
+                    "contacts": contacts,
+                }
+                sent_cached = True
+                yield response
+    except Exception:
+        pass
     try:
         live = list_cmd(state, req)
     except Exception as exc:
         if not sent_cached:
-            yield {"id": req["id"], "ok": False, "error": str(exc)}
+            yield {"id": rid, "ok": False, "error": str(exc)}
         return
     yield live
 

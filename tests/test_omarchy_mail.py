@@ -601,6 +601,38 @@ class TestListResponses(unittest.TestCase):
             mail.list_cmd = old
         self.assertEqual(out, [{"id": "r1", "ok": False, "error": "login failed"}])
 
+    def test_bad_limit_is_reported_not_raised(self):
+        def reject(_state, req):
+            int(req.get("limit") or 0)
+            raise mail.Error("unreachable")
+
+        old = mail.list_cmd
+        mail.list_cmd = reject
+        try:
+            with TempHome():
+                mail.save_list_cache([{"accountId": "acct1", "id": "c1", "when": ""}], [], {"acct1": 1}, "inbox")
+                out = list(mail.list_responses(FakeState(["acct1"]), {"id": "r1", "account": "acct1", "limit": "abc"}))
+        finally:
+            mail.list_cmd = old
+        self.assertEqual(len(out), 1)
+        self.assertFalse(out[0]["ok"])
+        self.assertEqual(out[0]["id"], "r1")
+
+    def test_cache_failure_is_treated_as_no_cache(self):
+        live = {"id": "r1", "ok": True, "cached": False, "unread": 0, "conversations": [], "contacts": []}
+
+        def boom(*_args):
+            raise RuntimeError("corrupt cache")
+
+        old_cmd, old_load = mail.list_cmd, mail.load_list_cache
+        mail.list_cmd = lambda _state, _req: live
+        mail.load_list_cache = boom
+        try:
+            out = list(mail.list_responses(FakeState(["acct1"]), {"id": "r1", "account": "acct1"}))
+        finally:
+            mail.list_cmd, mail.load_list_cache = old_cmd, old_load
+        self.assertEqual(out, [live])
+
     def test_all_view_caches_each_account_full_page(self):
         def rows_for(aid, n, start):
             return [
