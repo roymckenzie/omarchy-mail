@@ -541,5 +541,118 @@ class TestListCache(unittest.TestCase):
         self.assertEqual(len(cached), 1)
 
 
+class FakeState:
+    def __init__(self, ids):
+        self.accounts = [{"id": aid, "email": f"{aid}@example.com"} for aid in ids]
+
+    def selected_accounts(self, account_id):
+        if not account_id or account_id == "all":
+            return list(self.accounts)
+        return [a for a in self.accounts if a["id"] == account_id]
+
+    def with_session(self, account_id, fn):
+        return fn(next(a for a in self.accounts if a["id"] == account_id), None)
+
+
+class TempHome:
+    def __enter__(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old = os.environ.get("HOME")
+        os.environ["HOME"] = self.tmp.name
+        return self.tmp.name
+
+    def __exit__(self, *exc):
+        if self.old is None:
+            del os.environ["HOME"]
+        else:
+            os.environ["HOME"] = self.old
+        self.tmp.cleanup()
+
+
+class TestListResponses(unittest.TestCase):
+    def test_cached_page_is_yielded_before_the_live_fetch(self):
+        state = FakeState(["acct1"])
+        calls = []
+        old = mail.list_cmd
+        mail.list_cmd = lambda _state, req: calls.append(req["id"]) or {"id": req["id"], "ok": True, "cached": False}
+        try:
+            with TempHome():
+                mail.save_list_cache([{"accountId": "acct1", "id": "c1", "when": ""}], [], {"acct1": 1}, "inbox")
+                responses = mail.list_responses(state, {"id": "r1", "account": "acct1", "mailbox": "inbox"})
+                first = next(responses)
+                self.assertTrue(first["cached"])
+                self.assertEqual(calls, [], "live fetch ran before the cached page was handed out")
+                second = next(responses)
+                self.assertFalse(second["cached"])
+                self.assertEqual(calls, ["r1"])
+        finally:
+            mail.list_cmd = old
+
+    def test_live_error_without_cache_is_reported(self):
+        def boom(_state, _req):
+            raise mail.Error("login failed")
+
+        old = mail.list_cmd
+        mail.list_cmd = boom
+        try:
+            with TempHome():
+                out = list(mail.list_responses(FakeState(["acct1"]), {"id": "r1", "account": "acct1"}))
+        finally:
+            mail.list_cmd = old
+        self.assertEqual(out, [{"id": "r1", "ok": False, "error": "login failed"}])
+
+    def test_bad_limit_is_reported_not_raised(self):
+        def reject(_state, req):
+            int(req.get("limit") or 0)
+            raise mail.Error("unreachable")
+
+        old = mail.list_cmd
+        mail.list_cmd = reject
+        try:
+            with TempHome():
+                mail.save_list_cache([{"accountId": "acct1", "id": "c1", "when": ""}], [], {"acct1": 1}, "inbox")
+                out = list(mail.list_responses(FakeState(["acct1"]), {"id": "r1", "account": "acct1", "limit": "abc"}))
+        finally:
+            mail.list_cmd = old
+        self.assertEqual(len(out), 1)
+        self.assertFalse(out[0]["ok"])
+        self.assertEqual(out[0]["id"], "r1")
+
+    def test_cache_failure_is_treated_as_no_cache(self):
+        live = {"id": "r1", "ok": True, "cached": False, "unread": 0, "conversations": [], "contacts": []}
+
+        def boom(*_args):
+            raise RuntimeError("corrupt cache")
+
+        old_cmd, old_load = mail.list_cmd, mail.load_list_cache
+        mail.list_cmd = lambda _state, _req: live
+        mail.load_list_cache = boom
+        try:
+            out = list(mail.list_responses(FakeState(["acct1"]), {"id": "r1", "account": "acct1"}))
+        finally:
+            mail.list_cmd, mail.load_list_cache = old_cmd, old_load
+        self.assertEqual(out, [live])
+
+    def test_all_view_caches_each_account_full_page(self):
+        def rows_for(aid, n, start):
+            return [
+                row(account_id=aid, uid=i, when_ts=start + i, message_id=f"<{aid}-{i}@x>", ids=[f"<{aid}-{i}@x>"],
+                    when=mail.formatdate(start + i))
+                for i in range(n)
+            ]
+
+        pages = {"acct1": rows_for("acct1", 4, 1000), "acct2": rows_for("acct2", 4, 2000)}
+        old = mail.list_account
+        mail.list_account = lambda account, _imap, _role, _limit, _query: (0, pages[account["id"]])
+        try:
+            with TempHome():
+                mail.list_cmd(FakeState(["acct1", "acct2"]), {"id": "r1", "account": "all", "mailbox": "inbox", "limit": 4})
+                acct1 = mail.load_account_cache("acct1", "inbox")
+        finally:
+            mail.list_account = old
+        # acct2's mail is newer, so the merged page of 4 holds none of acct1's.
+        self.assertEqual(len(acct1["conversations"]), 4)
+
+
 if __name__ == "__main__":
     unittest.main()
